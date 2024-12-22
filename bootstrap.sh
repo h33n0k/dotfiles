@@ -34,8 +34,11 @@ for package in jq git yq; do
 			debian) sudo apt-get install -y "$package" ;;
 		esac
 	fi
-
 done
+
+case "$DIST" in
+	arch) sudo pacman -S --noconfirm base-devel ;;
+esac
 
 parse_echo() {
 	# Convert hex color code to RGB and return an ANSI escape code for color
@@ -79,12 +82,13 @@ fi
 
 # Read modules
 modules="[]"
+managers=("pacman" "aur" "apt")
 for element in $BASE_DIR/*; do
 	[[ ! -d $element ]] && continue
 	config="$element/.module.toml"
 	[[ ! -f "$config" ]] && continue
 	packages="{}"
-	for manager in "pacman" "aur" "apt"; do
+	for manager in ${managers[@]}; do
 		list="[]"
 		if tomlq -r ".dependencies.$manager[]" "$config" > /dev/null 2>&1; then
 			for package in $(tomlq -r ".dependencies.$manager[]" "$config"); do
@@ -218,7 +222,7 @@ prompt_menu() {
 									done
 
 									echo > /dev/tty
-									echo -e "$(parse_echo "#f5bde6")Press enter to continue." > /dev/tty
+									echo -e "$(parse_echo "#f5bde6")Press enter to continue.$(reset_echo)" > /dev/tty
 
 									update=false
 		fi
@@ -261,4 +265,37 @@ prompt_menu() {
 }
 
 selected=$(prompt_menu -p "Select modules to enable" -i "$modules")
-echo "$selected" | jq
+
+# list packages dependencies
+packages="{}"
+for manager in ${managers[@]}; do
+	array="[]"
+	for item in $(jq -c '.[]' <<< "$selected"); do
+		for package in $(jq -cr ".dependencies.packages.$manager[]" <<< "$item"); do
+			array=$(jq -c --arg package "$package" '. + [$package]' <<< "$array")
+		done
+	done
+	packages=$(jq -c --arg name "$manager" --argjson array "$array" '. + { $name: $array }' <<< "$packages")
+done
+
+# Install dependencies
+case "$DIST" in
+	arch)
+		# Install pacman packages
+		sudo pacman -Sy $(jq -r '[.pacman[]] | unique | .[]' <<< "$packages")
+
+		# Install aur packages
+		for repo in $(jq -r '[.aur[]] | unique | .[]' <<< "$packages"); do
+			dir="/tmp/aur_$dir$(echo "$repo" | sed 's|.*/||; s|\.git$||')"
+			git clone "$repo" "$dir"
+			if [[ -d "$dir" ]]; then
+				cd "$dir" || exit 1
+				makepkg -sic --noconfirm
+				cd - || exit 1
+				rm -rf "$dir"
+			fi
+		done
+		;;
+
+	debian) sudo apt-get install $(jq -r '[.apt[]] | unique | .[]' <<< "$packages") ;;
+esac
