@@ -278,6 +278,13 @@ for manager in ${managers[@]}; do
 	packages=$(jq -c --arg name "$manager" --argjson array "$array" '. + { $name: $array }' <<< "$packages")
 done
 
+scripts="[]"
+for item in $(jq -c '.[]' <<< "$selected"); do
+	for script in $(jq -c '.dependencies.scripts[]' <<< "$item"); do
+		scripts=$(jq --arg path "$(jq -r '.path' <<< "$script")" '. + [$path]' <<< "$scripts")
+	done
+done
+
 # Install dependencies
 case "$DIST" in
 	arch)
@@ -299,3 +306,13 @@ case "$DIST" in
 
 	debian) sudo apt-get install $(jq -r '[.apt[]] | unique | .[]' <<< "$packages") ;;
 esac
+
+# Run scripts
+for script in $(jq -cr '.[]' <<< "$scripts"); do
+	if [ ! -f "$script" ]; then
+		echo "$(parse_echo "$COLOR_RED")Could not locate $script.$(reset_echo)"
+		continue
+	fi
+	chmod +x "$script"
+	$script
+done
