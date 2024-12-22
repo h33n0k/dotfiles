@@ -7,6 +7,19 @@ COLOR_PEACH="#f5a97f"
 BASE_DIR="$(cd "$(dirname "$0")" && pwd -P)" # Get current pwd
 DIST="$(. /etc/os-release && echo "$ID")" # Get current linux distribution
 
+# Initialize variables
+UPDATE_REQUIRED=false
+
+# Parse the options
+while [[ $# -gt 0 ]]; do
+	case $1 in
+		--update-required)
+			UPDATE_REQUIRED=true
+			shift
+			;;
+	esac
+done
+
 # Update sources
 case "$DIST" in
 	arch) sudo pacman -Syy ;;
@@ -37,6 +50,7 @@ reset_echo() {
 compare_version() {
 	# Compare two versions, return 0 if $1 >= $2, else return 1
 	if ! [[ "$(printf '%s\n' "$1" "$2" | sort -V | head -n1)" == "$1" ]] > /dev/null 2>&1; then
+		[[ $UPDATE_REQUIRED == true ]] && return 1 # auto install
 		echo "$(parse_echo "$COLOR_RED")'$3' does not match the required version >= $1." > /dev/tty
 		echo "$(parse_echo "$COLOR_MAROON")Installed: $2" > /dev/tty
 		echo "$(parse_echo "$COLOR_PEACH")Install required version ? (Y/N)$(reset_echo)" > /dev/tty
