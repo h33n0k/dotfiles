@@ -77,4 +77,56 @@ if ! compare_version "1.7.1" "$(jq --version 2>/dev/null | sed 's/^jq-//')" "jq"
 	sudo mv $BASE_DIR/jq /usr/bin/jq
 fi
 
-jq --version
+# Read modules
+modules="[]"
+for element in $BASE_DIR/*; do
+	[[ ! -d $element ]] && continue
+	config="$element/.module.toml"
+	[[ ! -f "$config" ]] && continue
+	packages="{}"
+	for manager in "pacman" "aur" "apt"; do
+		list="[]"
+		if tomlq -r ".dependencies.$manager[]" "$config" > /dev/null 2>&1; then
+			for package in $(tomlq -r ".dependencies.$manager[]" "$config"); do
+				list=$(echo "$list" | jq -c --arg package "$package" '. + [$package]')
+			done
+		fi
+		packages=$(echo "$packages" | jq --arg manager "$manager" --argjson packages "$list" '. + {($manager): $packages}')
+	done
+
+	scripts="[]"
+	if tomlq -r '.scripts[]' $config > /dev/null 2>&1; then
+		IFS=$'\n'
+		for script in $(tomlq -rc '.scripts[] | { path: .path, description: .description }' "$config"); do
+			file="$(echo "$script" | jq -rc '.path')"
+			description="$(echo "$script" | jq -rc '.description')"
+			[[ "$file" != /* ]] && path="$(realpath "$element/$file")" || path="$file"
+			scripts=$(echo "$scripts" | jq -c \
+				--arg path "$path" \
+				--arg description "$description" \
+				'. + [{ path: $path, description: $description }]'
+			)
+		done
+	fi
+
+	dependencies=$(jq -n \
+		--argjson packages "$packages" \
+		--argjson scripts "$scripts" \
+		'{ packages: $packages, scripts: $scripts }'
+	)
+
+	modules=$(jq -c \
+		--argjson module "$(jq -n \
+			--arg path "$element" \
+			--arg type "$(tomlq -r '.module.type' $config)" \
+			--arg name "$(tomlq -r '.module.name' $config)" \
+			--arg description "$(tomlq -r '.module.description' $config)" \
+			--argjson dependencies "$dependencies" \
+			'{ path: $path, selected: true, name: $name, description: $description, type: $type, dependencies: $dependencies }'
+			)" \
+		'. + [$module]' \
+		<<< "$modules"
+	)
+done
+
+echo "$modules" | jq
