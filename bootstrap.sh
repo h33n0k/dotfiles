@@ -129,4 +129,136 @@ for element in $BASE_DIR/*; do
 	)
 done
 
-echo "$modules" | jq
+hide_cursor() {
+	echo -ne "\e[?25l" > /dev/tty
+}
+
+show_cursor() {
+	echo -ne "\e[?25h" > /dev/tty
+}
+
+# Ensure cursor visibility when exiting
+trap 'show_cursor' EXIT
+
+ascii() {
+	echo -e "
+██╗  ██╗██████╗ ██████╗ ███╗   ██╗ ██████╗ ██╗  ██╗
+██║  ██║╚════██╗╚════██╗████╗  ██║██╔═████╗██║ ██╔╝
+███████║ █████╔╝ █████╔╝██╔██╗ ██║██║██╔██║█████╔╝
+██╔══██║ ╚═══██╗ ╚═══██╗██║╚██╗██║████╔╝██║██╔═██╗
+██║  ██║██████╔╝██████╔╝██║ ╚████║╚██████╔╝██║  ██╗
+╚═╝  ╚═╝╚═════╝ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝
+	" | sed "s/\(.*\)/\x1b[35m\1\x1b[0m/"
+}
+
+display_item() {
+	echo "$4$(parse_echo $([[ $3 == false ]] && echo "#cad3f5" || echo "#8bd5ca"))[$( [[ $2 == true ]] && echo "X" || echo " " )] $1 $(parse_echo "#6e738d")$5"
+}
+
+get_motion() {
+	local key
+	read -s -N1 key
+	case "$key" in
+		$'\n') echo "enter" ;;
+		' ') echo "space" ;;
+		A|k) echo "up" ;;
+		B|j) echo "down" ;;
+		B|q) echo "quit" ;;
+	esac
+}
+
+prompt_menu() {
+	local items="[]"
+	while getopts "p:i:" opt; do
+		case $opt in
+			p) prompt=$OPTARG ;;
+			i) items=$(echo "$OPTARG" | jq -c 'group_by(.type) | map({type: .[0].type, selected: false, items: .})') ;;
+		esac
+	done
+
+	# Assign index to elements
+	local i=0
+	local ti=0
+	for type in $(echo "$items" | jq -c '.[]'); do
+		items=$(echo "$items" | jq -c --arg ti "$ti" --arg value "$i" '.[$ti|tonumber] += { index: $value }')
+		(( i++ ))
+		local mi=0
+		for item in $(echo "$type" | jq -c '.items[]'); do
+			items=$(echo "$items" | jq -c --arg ti "$ti" --arg mi "$mi" --arg value "$i" '.[$ti|tonumber].items[$mi|tonumber] += { index: $value }')
+			(( i++ ))
+			(( mi++ ))
+		done
+		(( ti++ ))
+	done
+
+	local current=0
+	local update=true
+	local selected=false
+	hide_cursor
+	while [ $selected = false ]; do
+		if [[ $update = true ]]; then
+			clear > /dev/tty
+			ascii > /dev/tty
+			echo -e "$(parse_echo "#c6a0f6")$prompt:" > /dev/tty
+			echo > /dev/tty
+			for type in $(echo "$items" | jq -c '.[]'); do
+				display_item \
+					$(jq -r '.type' <<< "$type") \
+					$(jq -r '.selected' <<< "$type") \
+					$([[ $current == $(jq -r '.index' <<< "$type") ]] && echo true || echo false) \
+					> /dev/tty
+									for item in $(echo "$type" | jq -c '.items[]'); do
+										display_item \
+											$(jq -r '.name' <<< "$item") \
+											$(jq -r '.selected' <<< "$item") \
+											$([[ $current == $(jq -r '.index' <<< "$item") ]] && echo true || echo false) \
+											"  " \
+											$(jq -r '.description' <<< "$item") > /dev/tty
+										done
+									done
+
+									echo > /dev/tty
+									echo -e "$(parse_echo "#f5bde6")Press enter to continue." > /dev/tty
+
+									update=false
+		fi
+
+		local motion=$(get_motion)
+		case $motion in
+			up)
+				(( current = (current - 1 + i) % i ))
+				update=true
+				;;
+			down)
+				(( current = (current + 1) % i ))
+				update=true
+				;;
+			space)
+				update=true
+				type=$(jq --arg i "$current" '.[] | select(.index == $i)' <<< "$items")
+				if [[ -z "$type" || "$type" == "null" ]]; then
+					echo "$current" > /dev/tty
+					items=$(jq -c \
+						--arg index "$current" \
+						'map(.items |= map(if .index == $index then .selected = if .selected == true then false else true end else . end))' \
+						<<< "$items"
+					)
+				else
+					items=$(jq -c \
+						--arg type "$(jq -r '.type' <<< "$type")" \
+						--arg selected "$([[ $(jq -r '.selected' <<< "$type") == true ]] && echo false || echo true)" \
+						'map(if .type == $type then .selected = ($selected|fromjson) | .items |= map(.selected = ($selected|fromjson)) else . end)' \
+						<<< "$items"
+					)
+				fi
+				;;
+			enter) selected=true ;;
+			quit) exit 1 ;;
+		esac
+	done
+
+	jq -c '[.[] | .items[] | select(.selected == true)]' <<< "$items"
+}
+
+selected=$(prompt_menu -p "Select modules to enable" -i "$modules")
+echo "$selected" | jq
