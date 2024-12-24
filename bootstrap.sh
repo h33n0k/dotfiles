@@ -3,9 +3,10 @@
 COLOR_RED="#ed8796"
 COLOR_MAROON="#ee99a0"
 COLOR_PEACH="#f5a97f"
+COLOR_PINK="#f5bde6"
 
-BASE_DIR="$(cd "$(dirname "$0")" && pwd -P)" # Get current pwd
-DIST="$(. /etc/os-release && echo "$ID")" # Get current linux distribution
+export BASE_DIR="$(cd "$(dirname "$0")" && pwd -P)" # Get current pwd
+export DIST="$(. /etc/os-release && echo "$ID")" # Get current linux distribution
 
 # Initialize variables
 UPDATE_REQUIRED=false
@@ -27,7 +28,7 @@ case "$DIST" in
 esac
 
 # Install required tools
-for package in jq git yq; do
+for package in jq git yq stow; do
 	if ! command -v "$package" > /dev/null 2>&1; then
 		case "$DIST" in
 			arch) sudo pacman -S --noconfirm "$package" ;;
@@ -85,7 +86,7 @@ modules="[]"
 managers=("pacman" "aur" "apt")
 for element in $BASE_DIR/*; do
 	[[ ! -d $element ]] && continue
-	config="$element/.module.toml"
+	config="$element/module.toml"
 	[[ ! -f "$config" ]] && continue
 	packages="{}"
 	for manager in ${managers[@]}; do
@@ -211,20 +212,20 @@ prompt_menu() {
 					$(jq -r '.selected' <<< "$type") \
 					$([[ $current == $(jq -r '.index' <<< "$type") ]] && echo true || echo false) \
 					> /dev/tty
-									for item in $(echo "$type" | jq -c '.items[]'); do
-										display_item \
-											$(jq -r '.name' <<< "$item") \
-											$(jq -r '.selected' <<< "$item") \
-											$([[ $current == $(jq -r '.index' <<< "$item") ]] && echo true || echo false) \
-											"  " \
-											$(jq -r '.description' <<< "$item") > /dev/tty
-										done
-									done
+				for item in $(echo "$type" | jq -c '.items[]'); do
+					display_item \
+						$(jq -r '.name' <<< "$item") \
+						$(jq -r '.selected' <<< "$item") \
+						$([[ $current == $(jq -r '.index' <<< "$item") ]] && echo true || echo false) \
+						"  " \
+						$(jq -r '.description' <<< "$item") > /dev/tty
+					done
+				done
 
-									echo > /dev/tty
-									echo -e "$(parse_echo "#f5bde6")Press enter to continue.$(reset_echo)" > /dev/tty
+				echo > /dev/tty
+				echo -e "$(parse_echo "#f5bde6")Press enter to continue.$(reset_echo)" > /dev/tty
 
-									update=false
+				update=false
 		fi
 
 		local motion=$(get_motion)
@@ -278,14 +279,23 @@ for manager in ${managers[@]}; do
 	packages=$(jq -c --arg name "$manager" --argjson array "$array" '. + { $name: $array }' <<< "$packages")
 done
 
+# List scripts
 scripts="[]"
 for item in $(jq -c '.[]' <<< "$selected"); do
 	for script in $(jq -c '.dependencies.scripts[]' <<< "$item"); do
-		scripts=$(jq --arg path "$(jq -r '.path' <<< "$script")" '. + [$path]' <<< "$scripts")
+		scripts=$(jq --argjson script "$script" '. + [$script]' <<< "$scripts")
 	done
 done
 
+step_header() {
+	clear
+	echo "$(parse_echo "$COLOR_PINK")$1$(reset_echo)" > /dev/tty
+	sleep 1s
+	return 0
+}
+
 # Install dependencies
+step_header "Installing dependencies"
 case "$DIST" in
 	arch)
 		# Install pacman packages
@@ -307,12 +317,33 @@ case "$DIST" in
 	debian) sudo apt-get install $(jq -r '[.apt[]] | unique | .[]' <<< "$packages") ;;
 esac
 
+# Define xdg variables
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_CACHE_HOME="$HOME/.cache"
+export XDG_DATA_HOME="$HOME/.local/share"
+
 # Run scripts
+step_header "Run configuration scripts"
 for script in $(jq -cr '.[]' <<< "$scripts"); do
-	if [ ! -f "$script" ]; then
-		echo "$(parse_echo "$COLOR_RED")Could not locate $script.$(reset_echo)"
+	path="$(jq -r '.path' <<< "$script")"
+	if [ ! -f "$path" ]; then
+		echo "$(parse_echo "$COLOR_RED")Could not locate $path.$(reset_echo)"
 		continue
 	fi
-	chmod +x "$script"
-	$script
+	chmod +x "$path"
+	$path
+done
+
+# Link files
+step_header "Symlinking configuration files"
+for module in $(jq -c '.[]' <<< "$selected"); do
+	module_path="$(jq -r '.path' <<< "$item")/"
+	local_ignore="$module_path".stow-local-ignore
+	[[ -f "$local_ignore" ]] && truncate -s 0 "$local_ignore" || touch "$local_ignore"
+	echo "module.toml" > "$local_ignore"
+	for script in $(jq -c '.scripts[]' <<< "$module"); do
+		script_path="$(jq -r '.path' <<< "$script")"
+		echo "${script_path#$module_path}" >> "$local_ignore"
+	done
+	stow -d "$BASE_DIR" -t "$HOME" "$(basename "$(jq -r '.path' <<< "$module")")"
 done
