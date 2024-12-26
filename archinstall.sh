@@ -77,7 +77,10 @@ handle_options() {
 handle_options "$@"
 
 # Partitioning disks
-gdisk "$P_DEVICE" <<EOF
+UEFI=true
+[ ! -d /sys/firmware/efi ] && UEFI=false
+if [[ "$UEFI" == true ]]; then
+	gdisk "$P_DEVICE" <<EOF
 o
 Y
 n
@@ -98,11 +101,29 @@ $( [[ "$P_ENCRYPT" == true ]] && echo 8309 || echo 8300 )
 w
 y
 EOF
+else
+	gdisk "$P_DEVICE" <<EOF
+o
+Y
+n
+1
+
++1G
+ef02
+n
+2
+
+
+$( [[ "$P_ENCRYPT" == true ]] && echo 8309 || echo 8300 )
+w
+y
+EOF
+fi
 
 # Define partitions
 EFI_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E '1$' | tail -n 1)
-BOOT_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E '2$' | tail -n 1)
-LVM_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E '3$' | tail -n 1)
+BOOT_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E "$([[ "$UEFI" == true ]] && echo 2 || echo 1)$" | tail -n 1)
+LVM_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E "$([[ "$UEFI" == true ]] && echo 3 || echo 2)$" | tail -n 1)
 SWAP_PARTITION=""
 HOME_PARTITION=""
 ROOT_PARTITION=""
@@ -148,20 +169,22 @@ lvcreate -n root -L "$ROOT_PARTITION_SIZE" -C y arch  # ROOT
 lvcreate -n home -l +100%FREE arch										# HOME
 
 # FS formatting
-mkfs.fat -F32 "$EFI_PARTITION"				# EFI
-mkfs.ext4 "$BOOT_PARTITION"						# BOOT
-mkfs.btrfs -L root "$ROOT_PARTITION"	# ROOT
-mkfs.btrfs -L home "$HOME_PARTITION"	# HOME
-mkswap "$SWAP_PARTITION"							# SWAP
+[[ "$UEFI" == true ]] && mkfs.fat -F32 "$EFI_PARTITION"	# EFI
+mkfs.ext4 "$BOOT_PARTITION"															# BOOT
+mkfs.btrfs -L root "$ROOT_PARTITION"										# ROOT
+mkfs.btrfs -L home "$HOME_PARTITION"										# HOME
+mkswap "$SWAP_PARTITION"																# SWAP
 
 # Partitions mounting
 ## SWAP
 swapon "$SWAP_PARTITION"
 swapon -a
 
-mount "$ROOT_PARTITION" /mnt					# ROOT
+mount "$ROOT_PARTITION" /mnt						# ROOT
 mkdir -p /mnt/{home,boot}
-mount "$BOOT_PARTITION" /mnt/boot			# BOOT
-mkdir /mnt/boot/efi
-mount "$EFI_PARTITION" /mnt/boot/efi	# EFI
-mount "$HOME_PARTITION" /mnt/home			# HOME
+mount "$BOOT_PARTITION" /mnt/boot				# BOOT
+if [[ "$UEFI" == true ]]; then
+	mkdir /mnt/boot/efi
+	mount "$EFI_PARTITION" /mnt/boot/efi	# EFI
+fi
+mount "$HOME_PARTITION" /mnt/home				# HOME
