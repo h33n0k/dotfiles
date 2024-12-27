@@ -71,10 +71,10 @@ handle_options() {
 		eval "$var='$value'"
 	}
 
-	# [[ -z "$P_HOSTNAME" ]] && prompt "P_HOSTNAME" "hostname: "
-	# [[ -z "$P_ROOT_PASSWORD" ]] && prompt "P_ROOT_PASSWORD" "root password: "
-	# [[ -z "$P_USER" ]] && prompt "P_USER" "new user: "
-	# [[ -z "$P_USER_PASSWORD" ]] && prompt "P_USER_PASSWORD" "password: "
+	[[ -z "$P_HOSTNAME" ]] && prompt "P_HOSTNAME" "hostname: "
+	[[ -z "$P_ROOT_PASSWORD" ]] && prompt "P_ROOT_PASSWORD" "root password: "
+	[[ -z "$P_USER" ]] && prompt "P_USER" "new user: "
+	[[ -z "$P_USER_PASSWORD" ]] && prompt "P_USER_PASSWORD" "password: "
 	# [[ -z "$P_ZONE_INFO" ]] && echo "zone info: " && P_ZONE_INFO=$(find /usr/share/zoneinfo/ -type f | fzf --preview 'echo {} | cut -d/ -f5- | tr "/" " "' --height 40% --border --preview-window=down:1:wrap)
 	[[ -z "$P_DEVICE" ]] && echo "device: " && P_DEVICE=$(lsblk -o NAME,SIZE,TYPE | grep disk | awk '{print "/dev/" $1 " (" $2 ")"}' | fzf --prompt="Select a device: " --height 40% --border | awk '{print $1}')
 	# [[ -z "$P_LOCALE" ]] && echo "locale: " && P_LOCALE=$(grep -E '^.*UTF-8' /etc/locale.gen | awk '{print $1}' | fzf --preview 'echo {}' --height 40% --border --preview-window=down:3:wrap)
@@ -249,6 +249,16 @@ cryptsetup luksAddKey $LVM_PARTITION /crypt/arch_keyfile.bin
 "
 }
 
+set_users() {
+	arch-chroot /mnt /bin/bash -c "
+	echo $P_HOSTNAME > /etc/hostname
+	echo root:$P_ROOT_PASSWORD | chpasswd
+	useradd -m -G wheel -s /bin/bash $P_USER
+	echo $P_USER:$P_USER_PASSWORD | chpasswd
+	sed -i 's|^# %wheel ALL=(ALL:ALL) ALL|%wheel ALL=(ALL:ALL) ALL|' /etc/sudoers
+	"
+}
+
 # Refresh keyring & Install required dependencies
 pacman -Sy --noconfirm archlinux-keyring fzf && clear
 
@@ -267,3 +277,4 @@ arch_install
 mkinitcpio_configure
 bootloader_install
 [[ "$P_ENCRYPT" == true ]] && keyfile_configure
+set_users
