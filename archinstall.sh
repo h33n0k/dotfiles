@@ -71,12 +71,12 @@ handle_options() {
 		eval "$var='$value'"
 	}
 
+	[[ -z "$P_DEVICE" ]] && echo "device: " && P_DEVICE=$(lsblk -o NAME,SIZE,TYPE | grep disk | awk '{print "/dev/" $1 " (" $2 ")"}' | fzf --prompt="Select a device: " --height 40% --border | awk '{print $1}')
 	[[ -z "$P_HOSTNAME" ]] && prompt "P_HOSTNAME" "hostname: "
 	[[ -z "$P_ROOT_PASSWORD" ]] && prompt "P_ROOT_PASSWORD" "root password: "
 	[[ -z "$P_USER" ]] && prompt "P_USER" "new user: "
 	[[ -z "$P_USER_PASSWORD" ]] && prompt "P_USER_PASSWORD" "password: "
 	[[ -z "$P_ZONE_INFO" ]] && echo "zone info: " && P_ZONE_INFO=$(find /usr/share/zoneinfo/ -type f | fzf --preview 'echo {} | cut -d/ -f5- | tr "/" " "' --height 40% --border --preview-window=down:1:wrap)
-	[[ -z "$P_DEVICE" ]] && echo "device: " && P_DEVICE=$(lsblk -o NAME,SIZE,TYPE | grep disk | awk '{print "/dev/" $1 " (" $2 ")"}' | fzf --prompt="Select a device: " --height 40% --border | awk '{print $1}')
 	[[ -z "$P_LOCALE" ]] && echo "locale: " && P_LOCALE=$(grep -E '^.*UTF-8' /etc/locale.gen | fzf --preview 'echo {}' --height 40% --border --preview-window=down:3:wrap)
 }
 
@@ -232,8 +232,10 @@ bootloader_install() {
 	arch-chroot /mnt /bin/bash -c "$command"
 
 	local PREV_LINE='GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet"'
-	local NEXT_LINE="GRUB_CMDLINE_LINUX_DEFAULT=\"loglevel=3 quiet root=/dev/mapper/arch-root cryptdevice=UUID=$LVM_UUID:arch-lvm\""
-	[[ "$P_ENCRYPT" == true ]] && arch-chroot /mnt /bin/bash -c "sed -i 's|$PREV_LINE|$NEXT_LINE|' /etc/default/grub"
+	local CMDLINE_DEFAULT="loglevel=3 quiet root=/dev/mapper/arch-root"
+	[[ "$P_ENCRYPT" == true ]] && CMDLINE_DEFAULT="$CMDLINE_DEFAULT cryptdevice=UUID=$LVM_UUID:arch-lvm"
+	local NEXT_LINE="GRUB_CMDLINE_LINUX_DEFAULT=\"$CMDLINE_DEFAULT\""
+	arch-chroot /mnt /bin/bash -c "sed -i 's|$PREV_LINE|$NEXT_LINE|' /etc/default/grub"
 
 	arch-chroot /mnt /bin/bash -c "chmod 600 /boot/initramfs-linux*"
 	arch-chroot /mnt /bin/bash -c "grub-mkconfig -o /boot/grub/grub.cfg"
