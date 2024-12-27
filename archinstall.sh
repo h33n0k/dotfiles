@@ -270,6 +270,16 @@ set_lang() {
 	"
 }
 
+set_clock() {
+	arch-chroot /mnt /bin/bash -c "
+		sed -i \
+			-e 's/^#NTP=/NTP=0.arch.pool.ntp.org 1.arch.pool.ntp.org 2.arch.pool.ntp.org 3.arch.pool.ntp.org/' \
+			-e 's/^#FallbackNTP=.*/FallbackNTP=0.pool.ntp.org 1.pool.ntp.org/' \
+			/etc/systemd/timesyncd.conf
+		systemctl enable systemd-timesyncd.service
+	"
+}
+
 # Refresh keyring & Install required dependencies
 pacman -Sy --noconfirm archlinux-keyring fzf && clear
 
@@ -290,3 +300,4 @@ bootloader_install
 [[ "$P_ENCRYPT" == true ]] && keyfile_configure
 set_users
 set_lang
+set_clock
