@@ -240,6 +240,15 @@ bootloader_install() {
 	[[ "$UEFI" == true ]] && arch-chroot /mnt /bin/bash -c "grub-mkconfig -o /boot/efi/EFI/arch/grub.cfg"
 }
 
+keyfile_configure() {
+	arch-chroot /mnt /bin/bash -c "
+mkdir /crypt
+dd if=/dev/random of=/crypt/arch_keyfile.bin bs=512 count=8
+chmod 000 /crypt/*
+cryptsetup luksAddKey $LVM_PARTITION /crypt/arch_keyfile.bin
+"
+}
+
 # Refresh keyring & Install required dependencies
 pacman -Sy --noconfirm archlinux-keyring fzf && clear
 
@@ -257,3 +266,4 @@ mount_partitions
 arch_install
 mkinitcpio_configure
 bootloader_install
+[[ "$P_ENCRYPT" == true ]] && keyfile_configure
