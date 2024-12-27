@@ -295,7 +295,11 @@ split_partitions
 format_partitions
 mount_partitions
 arch_install
+
+set +e
 mkinitcpio_configure
+set -e
+
 bootloader_install
 [[ "$P_ENCRYPT" == true ]] && keyfile_configure
 set_users
