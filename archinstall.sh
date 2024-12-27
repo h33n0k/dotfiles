@@ -227,6 +227,19 @@ mkinitcpio_configure() {
 	arch-chroot /mnt /bin/bash -c "mkinitcpio -P"
 }
 
+bootloader_install() {
+	local command=$([[ "$UEFI" == true ]] && echo "grub-install --efi-directory=/boot/efi" || echo "grub-install --target=i386-pc $P_DEVICE")
+	arch-chroot /mnt /bin/bash -c "$command"
+
+	local PREV_LINE='GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet"'
+	local NEXT_LINE='GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet root=/dev/mapper/arch-root cryptdevice=UUID=${LVM_UUID}:arch-lvm"'
+	[[ "$P_ENCRYPT" == true ]] && arch-chroot /mnt /bin/bash -c "sed -i 's|$PREV_LINE|$NEXT_LINE|' /etc/default/grub"
+
+	arch-chroot /mnt /bin/bash -c "chmod 600 /boot/initramfs-linux*"
+	arch-chroot /mnt /bin/bash -c "grub-mkconfig -o /boot/grub/grub.cfg"
+	[[ "$UEFI" == true ]] && arch-chroot /mnt /bin/bash -c "grub-mkconfig -o /boot/efi/EFI/arch/grub.cfg"
+}
+
 # Refresh keyring & Install required dependencies
 pacman -Sy --noconfirm archlinux-keyring fzf && clear
 
@@ -243,3 +256,4 @@ format_partitions
 mount_partitions
 arch_install
 mkinitcpio_configure
+bootloader_install
