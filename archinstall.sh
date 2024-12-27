@@ -2,9 +2,6 @@
 
 set -e
 
-# Refresh keyring
-pacman -Sy --noconfirm archlinux-keyring fzf && clear
-
 # Initialize variables
 P_HOSTNAME=""
 P_ZONE_INFO=""
@@ -14,6 +11,15 @@ P_ROOT_PASSWORD=""
 P_USER=""
 P_USER_PASSWORD=""
 P_ENCRYPT=true
+EFI_PARTITION=""
+BOOT_PARTITION=""
+LVM_PARTITION=""
+LVM_UUID=""
+SWAP_PARTITION=""
+HOME_PARTITION=""
+ROOT_PARTITION=""
+UEFI=true
+[ ! -d /sys/firmware/efi ] && UEFI=false
 
 # Function to handle parameters
 handle_options() {
@@ -74,117 +80,152 @@ handle_options() {
 	# [[ -z "$P_LOCALE" ]] && echo "locale: " && P_LOCALE=$(grep -E '^.*UTF-8' /etc/locale.gen | awk '{print $1}' | fzf --preview 'echo {}' --height 40% --border --preview-window=down:3:wrap)
 }
 
-handle_options "$@"
-
-# Partitioning disks
-UEFI=true
-[ ! -d /sys/firmware/efi ] && UEFI=false
-if [[ "$UEFI" == true ]]; then
-	gdisk "$P_DEVICE" <<EOF
+partition_disks() {
+	if [[ "$UEFI" == true ]]; then
+		gdisk "$P_DEVICE" <<EOF
 o
 Y
 n
-1
+
 
 +512M
 ef00
 n
-2
+
 
 +1G
 ef02
 n
-3
+
 
 
 $( [[ "$P_ENCRYPT" == true ]] && echo 8309 || echo 8300 )
 w
 y
 EOF
-else
-	gdisk "$P_DEVICE" <<EOF
+	else
+		gdisk "$P_DEVICE" <<EOF
 o
 Y
 n
-1
+
 
 +1G
 ef02
 n
-2
+
 
 
 $( [[ "$P_ENCRYPT" == true ]] && echo 8309 || echo 8300 )
 w
 y
 EOF
-fi
+	fi
 
-# Define partitions
+}
+
+split_partitions() {
+	if [[ "$P_ENCRYPT" == true ]]; then
+		# Load encryption modules
+		modprobe dm-crypt
+		modprobe dm-mod
+
+		# Encrypt partition
+		cryptsetup luksFormat -v -s 512 -h sha512 "$LVM_PARTITION"	# Encrypt
+		cryptsetup open "$LVM_PARTITION" arch-lvm										# Open
+
+		# LVM partitioning
+		pvcreate /dev/mapper/arch-lvm       # Create physical volume
+		vgcreate arch /dev/mapper/arch-lvm  # Create volume group
+
+		HOME_PARTITION="/dev/mapper/arch-home"
+		ROOT_PARTITION="/dev/mapper/arch-root"
+		SWAP_PARTITION="/dev/mapper/arch-swap"
+	else
+		pvcreate "$LVM_PARTITION"				# Create physical volume
+		vgcreate arch "$LVM_PARTITION"	# Create volume group
+
+		HOME_PARTITION="/dev/arch/home"
+		ROOT_PARTITION="/dev/arch/root"
+		SWAP_PARTITION="/dev/arch/swap"
+	fi
+
+	TOTAL_SIZE=$(lsblk -o SIZE -n "$LVM_PARTITION" | head -n 1 | tr -d '[:space:]G')
+
+	compute_size() {
+		fr=$(printf "%.2f\n" $(echo "$TOTAL_SIZE / 10" | bc -l))
+		printf "%.2fG\n" $(echo "$fr * $1" | bc -l)
+	}
+
+	SWAP_PARTITION_SIZE="$(compute_size 1)"
+	ROOT_PARTITION_SIZE="$(compute_size 4)"
+
+	# Create logical volumes
+	lvcreate -n swap -L "$SWAP_PARTITION_SIZE" -C y arch  # SWAP
+	lvcreate -n root -L "$ROOT_PARTITION_SIZE" -C y arch  # ROOT
+	lvcreate -n home -l +100%FREE arch										# HOME
+}
+
+format_partitions() {
+	# FS formatting
+	[[ "$UEFI" == true ]] && mkfs.fat -F32 "$EFI_PARTITION"	# EFI
+	mkfs.ext4 "$BOOT_PARTITION"															# BOOT
+	mkfs.btrfs -L root "$ROOT_PARTITION"										# ROOT
+	mkfs.btrfs -L home "$HOME_PARTITION"										# HOME
+	mkswap "$SWAP_PARTITION"																# SWAP
+}
+
+mount_partitions() {
+	# Partitions mounting
+	swapon "$SWAP_PARTITION"								# SWAP
+	swapon -a
+
+	mount "$ROOT_PARTITION" /mnt						# ROOT
+	mkdir -p /mnt/{home,boot}
+	mount "$BOOT_PARTITION" /mnt/boot				# BOOT
+	if [[ "$UEFI" == true ]]; then
+		mkdir /mnt/boot/efi
+		mount "$EFI_PARTITION" /mnt/boot/efi	# EFI
+	fi
+	mount "$HOME_PARTITION" /mnt/home			# HOME
+}
+
+arch_install() {
+	pacstrap -K /mnt \
+    base \
+    base-devel \
+    linux \
+    linux-firmware \
+    lvm2 \
+    grub \
+    efibootmgr \
+		networkmanager
+
+	# Save mounts
+	genfstab -U -p /mnt > /mnt/etc/fstab
+
+	# Update keyring
+	arch-chroot /mnt /bin/bash -c "
+pacman -Sy --noconfirm archlinux-keyring
+pacman-key --init
+pacman-key --populate archlinux
+pacman -Scc --noconfirm
+pacman -Sy
+"
+}
+
+# Refresh keyring & Install required dependencies
+pacman -Sy --noconfirm archlinux-keyring fzf && clear
+
+handle_options "$@"
+
+partition_disks
 EFI_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E '1$' | tail -n 1)
 BOOT_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E "$([[ "$UEFI" == true ]] && echo 2 || echo 1)$" | tail -n 1)
 LVM_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E "$([[ "$UEFI" == true ]] && echo 3 || echo 2)$" | tail -n 1)
-SWAP_PARTITION=""
-HOME_PARTITION=""
-ROOT_PARTITION=""
+LVM_UUID=$(blkid -s UUID -o value "$LVM_PARTITION")
 
-if [[ "$P_ENCRYPT" == true ]]; then
-	# Load encryption modules
-	modprobe dm-crypt
-	modprobe dm-mod
-
-	# Encrypt partition
-	cryptsetup luksFormat -v -s 512 -h sha512 "$LVM_PARTITION"	# Encrypt
-	cryptsetup open "$LVM_PARTITION" arch-lvm										# Open
-
-	# LVM partitioning
-	pvcreate /dev/mapper/arch-lvm       # Create physical volume
-	vgcreate arch /dev/mapper/arch-lvm  # Create volume group
-
-	HOME_PARTITION="/dev/mapper/arch-home"
-	ROOT_PARTITION="/dev/mapper/arch-root"
-	SWAP_PARTITION="/dev/mapper/arch-swap"
-else
-	pvcreate "$LVM_PARTITION"				# Create physical volume
-	vgcreate arch "$LVM_PARTITION"	# Create volume group
-
-	HOME_PARTITION="/dev/arch/home"
-	ROOT_PARTITION="/dev/arch/root"
-	SWAP_PARTITION="/dev/arch/swap"
-fi
-
-TOTAL_SIZE=$(lsblk -o SIZE -n "$LVM_PARTITION" | head -n 1 | tr -d '[:space:]G')
-
-compute_size() {
-	fr=$(printf "%.2f\n" $(echo "$TOTAL_SIZE / 10" | bc -l))
-	printf "%.2fG\n" $(echo "$fr * $1" | bc -l)
-}
-
-SWAP_PARTITION_SIZE="$(compute_size 1)"
-ROOT_PARTITION_SIZE="$(compute_size 4)"
-
-# Create logical volumes
-lvcreate -n swap -L "$SWAP_PARTITION_SIZE" -C y arch  # SWAP
-lvcreate -n root -L "$ROOT_PARTITION_SIZE" -C y arch  # ROOT
-lvcreate -n home -l +100%FREE arch										# HOME
-
-# FS formatting
-[[ "$UEFI" == true ]] && mkfs.fat -F32 "$EFI_PARTITION"	# EFI
-mkfs.ext4 "$BOOT_PARTITION"															# BOOT
-mkfs.btrfs -L root "$ROOT_PARTITION"										# ROOT
-mkfs.btrfs -L home "$HOME_PARTITION"										# HOME
-mkswap "$SWAP_PARTITION"																# SWAP
-
-# Partitions mounting
-## SWAP
-swapon "$SWAP_PARTITION"
-swapon -a
-
-mount "$ROOT_PARTITION" /mnt						# ROOT
-mkdir -p /mnt/{home,boot}
-mount "$BOOT_PARTITION" /mnt/boot				# BOOT
-if [[ "$UEFI" == true ]]; then
-	mkdir /mnt/boot/efi
-	mount "$EFI_PARTITION" /mnt/boot/efi	# EFI
-fi
-mount "$HOME_PARTITION" /mnt/home				# HOME
+split_partitions
+format_partitions
+mount_partitions
+arch_install
