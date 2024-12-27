@@ -232,7 +232,7 @@ bootloader_install() {
 	arch-chroot /mnt /bin/bash -c "$command"
 
 	local PREV_LINE='GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet"'
-	local NEXT_LINE='GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet root=/dev/mapper/arch-root cryptdevice=UUID=${LVM_UUID}:arch-lvm"'
+	local NEXT_LINE="GRUB_CMDLINE_LINUX_DEFAULT=\"loglevel=3 quiet root=/dev/mapper/arch-root cryptdevice=UUID=$LVM_UUID:arch-lvm\""
 	[[ "$P_ENCRYPT" == true ]] && arch-chroot /mnt /bin/bash -c "sed -i 's|$PREV_LINE|$NEXT_LINE|' /etc/default/grub"
 
 	arch-chroot /mnt /bin/bash -c "chmod 600 /boot/initramfs-linux*"
