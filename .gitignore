@@ -1,1 +1,4 @@
 .stow-local-ignore
+nvm/
+nvim/
+zsh/

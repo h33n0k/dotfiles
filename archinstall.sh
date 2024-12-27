@@ -214,6 +214,19 @@ pacman -Sy
 "
 }
 
+mkinitcpio_configure() {
+	local PREV_LINE="HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block filesystems fsck)"
+	local NEXT_LINE="HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block lvm2 filesystems fsck)"
+	local NEXT_LINE_ENCRYPT="HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt lvm2 filesystems fsck)"
+	if [[ "$P_ENCRYPT" == true ]]; then
+		arch-chroot /mnt /bin/bash -c "sed -i 's/$PREV_LINE/$NEXT_LINE_ENCRYPT/' /etc/mkinitcpio.conf"
+	else
+		arch-chroot /mnt /bin/bash -c "sed -i 's/$PREV_LINE/$NEXT_LINE/' /etc/mkinitcpio.conf"
+	fi
+
+	arch-chroot /mnt /bin/bash -c "mkinitcpio -P"
+}
+
 # Refresh keyring & Install required dependencies
 pacman -Sy --noconfirm archlinux-keyring fzf && clear
 
@@ -229,3 +242,4 @@ split_partitions
 format_partitions
 mount_partitions
 arch_install
+mkinitcpio_configure
