@@ -75,9 +75,9 @@ handle_options() {
 	[[ -z "$P_ROOT_PASSWORD" ]] && prompt "P_ROOT_PASSWORD" "root password: "
 	[[ -z "$P_USER" ]] && prompt "P_USER" "new user: "
 	[[ -z "$P_USER_PASSWORD" ]] && prompt "P_USER_PASSWORD" "password: "
-	# [[ -z "$P_ZONE_INFO" ]] && echo "zone info: " && P_ZONE_INFO=$(find /usr/share/zoneinfo/ -type f | fzf --preview 'echo {} | cut -d/ -f5- | tr "/" " "' --height 40% --border --preview-window=down:1:wrap)
+	[[ -z "$P_ZONE_INFO" ]] && echo "zone info: " && P_ZONE_INFO=$(find /usr/share/zoneinfo/ -type f | fzf --preview 'echo {} | cut -d/ -f5- | tr "/" " "' --height 40% --border --preview-window=down:1:wrap)
 	[[ -z "$P_DEVICE" ]] && echo "device: " && P_DEVICE=$(lsblk -o NAME,SIZE,TYPE | grep disk | awk '{print "/dev/" $1 " (" $2 ")"}' | fzf --prompt="Select a device: " --height 40% --border | awk '{print $1}')
-	# [[ -z "$P_LOCALE" ]] && echo "locale: " && P_LOCALE=$(grep -E '^.*UTF-8' /etc/locale.gen | awk '{print $1}' | fzf --preview 'echo {}' --height 40% --border --preview-window=down:3:wrap)
+	[[ -z "$P_LOCALE" ]] && echo "locale: " && P_LOCALE=$(grep -E '^.*UTF-8' /etc/locale.gen | fzf --preview 'echo {}' --height 40% --border --preview-window=down:3:wrap)
 }
 
 partition_disks() {
@@ -259,6 +259,17 @@ set_users() {
 	"
 }
 
+set_lang() {
+	local NEXT_LINE="${P_LOCALE#\#}"
+	LOCALE="LANG=$(echo $NEXT_LINE | sed 's/ UTF-8$//')"
+	arch-chroot /mnt /bin/bash -c "
+		ln -sf $P_ZONE_INFO /etc/localtime
+		sed -i 's|^$P_LOCALE|$NEXT_LINE|' /etc/locale.gen
+		locale-gen
+		echo '$LOCALE' > /etc/locale.conf
+	"
+}
+
 # Refresh keyring & Install required dependencies
 pacman -Sy --noconfirm archlinux-keyring fzf && clear
 
@@ -278,3 +289,4 @@ mkinitcpio_configure
 bootloader_install
 [[ "$P_ENCRYPT" == true ]] && keyfile_configure
 set_users
+set_lang
