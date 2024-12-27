@@ -25,42 +25,42 @@ UEFI=true
 handle_options() {
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
-			--no-encrypt)
-				P_ENCRYPT=false
-				shift
-				;;
-			--hostname)
-				P_HOSTNAME="$2"
-				shift 2
-				;;
-			--zone-info)
-				P_ZONE_INFO="$2"
-				shift 2
-				;;
-			--locale)
-				P_LOCALE="$2"
-				shift 2
-				;;
-			--device)
-				P_DEVICE="$2"
-				shift 2
-				;;
-			--root-password)
-				P_ROOT_PASSWORD="$2"
-				shift 2
-				;;
-			--user)
-				P_USER="$2"
-				shift 2
-				;;
-			--user-password)
-				P_USER_PASSWORD="$2"
-				shift 2
-				;;
-			*)
-				echo "Unknown option: $1"
-				exit 1
-				;;
+		--no-encrypt)
+			P_ENCRYPT=false
+			shift
+			;;
+		--hostname)
+			P_HOSTNAME="$2"
+			shift 2
+			;;
+		--zone-info)
+			P_ZONE_INFO="$2"
+			shift 2
+			;;
+		--locale)
+			P_LOCALE="$2"
+			shift 2
+			;;
+		--device)
+			P_DEVICE="$2"
+			shift 2
+			;;
+		--root-password)
+			P_ROOT_PASSWORD="$2"
+			shift 2
+			;;
+		--user)
+			P_USER="$2"
+			shift 2
+			;;
+		--user-password)
+			P_USER_PASSWORD="$2"
+			shift 2
+			;;
+		*)
+			echo "Unknown option: $1"
+			exit 1
+			;;
 		esac
 	done
 
@@ -99,7 +99,7 @@ n
 
 
 
-$( [[ "$P_ENCRYPT" == true ]] && echo 8309 || echo 8300 )
+$([[ "$P_ENCRYPT" == true ]] && echo 8309 || echo 8300)
 w
 y
 EOF
@@ -116,7 +116,7 @@ n
 
 
 
-$( [[ "$P_ENCRYPT" == true ]] && echo 8309 || echo 8300 )
+$([[ "$P_ENCRYPT" == true ]] && echo 8309 || echo 8300)
 w
 y
 EOF
@@ -131,19 +131,19 @@ split_partitions() {
 		modprobe dm-mod
 
 		# Encrypt partition
-		cryptsetup luksFormat -v -s 512 -h sha512 "$LVM_PARTITION"	# Encrypt
-		cryptsetup open "$LVM_PARTITION" arch-lvm										# Open
+		cryptsetup luksFormat -v -s 512 -h sha512 "$LVM_PARTITION" # Encrypt
+		cryptsetup open "$LVM_PARTITION" arch-lvm                  # Open
 
 		# LVM partitioning
-		pvcreate /dev/mapper/arch-lvm       # Create physical volume
-		vgcreate arch /dev/mapper/arch-lvm  # Create volume group
+		pvcreate /dev/mapper/arch-lvm      # Create physical volume
+		vgcreate arch /dev/mapper/arch-lvm # Create volume group
 
 		HOME_PARTITION="/dev/mapper/arch-home"
 		ROOT_PARTITION="/dev/mapper/arch-root"
 		SWAP_PARTITION="/dev/mapper/arch-swap"
 	else
-		pvcreate "$LVM_PARTITION"				# Create physical volume
-		vgcreate arch "$LVM_PARTITION"	# Create volume group
+		pvcreate "$LVM_PARTITION"      # Create physical volume
+		vgcreate arch "$LVM_PARTITION" # Create volume group
 
 		HOME_PARTITION="/dev/arch/home"
 		ROOT_PARTITION="/dev/arch/root"
@@ -161,57 +161,57 @@ split_partitions() {
 	ROOT_PARTITION_SIZE="$(compute_size 4)"
 
 	# Create logical volumes
-	lvcreate -n swap -L "$SWAP_PARTITION_SIZE" -C y arch  # SWAP
-	lvcreate -n root -L "$ROOT_PARTITION_SIZE" -C y arch  # ROOT
-	lvcreate -n home -l +100%FREE arch										# HOME
+	lvcreate -n swap -L "$SWAP_PARTITION_SIZE" -C y arch # SWAP
+	lvcreate -n root -L "$ROOT_PARTITION_SIZE" -C y arch # ROOT
+	lvcreate -n home -l +100%FREE arch                   # HOME
 }
 
 format_partitions() {
 	# FS formatting
-	[[ "$UEFI" == true ]] && mkfs.fat -F32 "$EFI_PARTITION"	# EFI
-	mkfs.ext4 "$BOOT_PARTITION"															# BOOT
-	mkfs.btrfs -L root "$ROOT_PARTITION"										# ROOT
-	mkfs.btrfs -L home "$HOME_PARTITION"										# HOME
-	mkswap "$SWAP_PARTITION"																# SWAP
+	[[ "$UEFI" == true ]] && mkfs.fat -F32 "$EFI_PARTITION" # EFI
+	mkfs.ext4 "$BOOT_PARTITION"                             # BOOT
+	mkfs.btrfs -L root "$ROOT_PARTITION"                    # ROOT
+	mkfs.btrfs -L home "$HOME_PARTITION"                    # HOME
+	mkswap "$SWAP_PARTITION"                                # SWAP
 }
 
 mount_partitions() {
 	# Partitions mounting
-	swapon "$SWAP_PARTITION"								# SWAP
+	swapon "$SWAP_PARTITION" # SWAP
 	swapon -a
 
-	mount "$ROOT_PARTITION" /mnt						# ROOT
+	mount "$ROOT_PARTITION" /mnt # ROOT
 	mkdir -p /mnt/{home,boot}
-	mount "$BOOT_PARTITION" /mnt/boot				# BOOT
+	mount "$BOOT_PARTITION" /mnt/boot # BOOT
 	if [[ "$UEFI" == true ]]; then
 		mkdir /mnt/boot/efi
-		mount "$EFI_PARTITION" /mnt/boot/efi	# EFI
+		mount "$EFI_PARTITION" /mnt/boot/efi # EFI
 	fi
-	mount "$HOME_PARTITION" /mnt/home			# HOME
+	mount "$HOME_PARTITION" /mnt/home # HOME
 }
 
 arch_install() {
 	pacstrap -K /mnt \
-    base \
-    base-devel \
-    linux \
-    linux-firmware \
-    lvm2 \
-    grub \
-    efibootmgr \
+		base \
+		base-devel \
+		linux \
+		linux-firmware \
+		lvm2 \
+		grub \
+		efibootmgr \
 		networkmanager
 
 	# Save mounts
-	genfstab -U -p /mnt > /mnt/etc/fstab
+	genfstab -U -p /mnt >/mnt/etc/fstab
 
 	# Update keyring
 	arch-chroot /mnt /bin/bash -c "
-pacman -Sy --noconfirm archlinux-keyring
-pacman-key --init
-pacman-key --populate archlinux
-pacman -Scc --noconfirm
-pacman -Sy
-"
+		pacman -Sy --noconfirm archlinux-keyring
+		pacman-key --init
+		pacman-key --populate archlinux
+		pacman -Scc --noconfirm
+		pacman -Sy
+	"
 }
 
 mkinitcpio_configure() {
@@ -244,20 +244,20 @@ bootloader_install() {
 
 keyfile_configure() {
 	arch-chroot /mnt /bin/bash -c "
-mkdir /crypt
-dd if=/dev/random of=/crypt/arch_keyfile.bin bs=512 count=8
-chmod 000 /crypt/*
-cryptsetup luksAddKey $LVM_PARTITION /crypt/arch_keyfile.bin
-"
+		mkdir /crypt
+		dd if=/dev/random of=/crypt/arch_keyfile.bin bs=512 count=8
+		chmod 000 /crypt/*
+		cryptsetup luksAddKey $LVM_PARTITION /crypt/arch_keyfile.bin
+	"
 }
 
 set_users() {
 	arch-chroot /mnt /bin/bash -c "
-	echo $P_HOSTNAME > /etc/hostname
-	echo root:$P_ROOT_PASSWORD | chpasswd
-	useradd -m -G wheel -s /bin/bash $P_USER
-	echo $P_USER:$P_USER_PASSWORD | chpasswd
-	sed -i 's|^# %wheel ALL=(ALL:ALL) ALL|%wheel ALL=(ALL:ALL) ALL|' /etc/sudoers
+		echo $P_HOSTNAME > /etc/hostname
+		echo root:$P_ROOT_PASSWORD | chpasswd
+		useradd -m -G wheel -s /bin/bash $P_USER
+		echo $P_USER:$P_USER_PASSWORD | chpasswd
+		sed -i 's|^# %wheel ALL=(ALL:ALL) ALL|%wheel ALL=(ALL:ALL) ALL|' /etc/sudoers
 	"
 }
 
