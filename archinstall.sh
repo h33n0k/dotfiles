@@ -87,7 +87,6 @@ trap exit_script EXIT
 
 journal_command() {
 	journal_log -l "COMMAND" -m "$1"
-	# eval "$1" >> "$LOG_FILE" 2>&1
 	eval "$1" | while IFS= read -r line; do
 		echo "$line" >>"$LOG_FILE"
 		update_tui
@@ -183,13 +182,13 @@ handle_options() {
 }
 
 partition_disks() {
-
+	journal_log -m "Disk partitioning"
 	local LVM_TYPE="$([[ "$P_ENCRYPT" == true ]] && echo 8309 || echo 8300)"
-	sgdisk --zap-all "$P_DEVICE"                                                  # Clear the partition table
-	[[ "$UEFI" == true ]] && sgdisk --new=0:0:+512M --typecode=0:ef00 "$P_DEVICE" # Create first partition with 512MB and type ef00
-	sgdisk --new=0:0:+1G --typecode=0:ef02 "$P_DEVICE"                            # Create second partition with 1GB and type ef02
-	sgdisk --new=0:0:0 --typecode=0:$LVM_TYPE "$P_DEVICE"                         # Create third partition with remaining space
-	sgdisk --print "$P_DEVICE"                                                    # Print the partition table
+	journal_command "sgdisk --zap-all $P_DEVICE"                                                  # Clear the partition table
+	[[ "$UEFI" == true ]] && journal_command "sgdisk --new=0:0:+512M --typecode=0:ef00 $P_DEVICE" # Create first partition with 512MB and type ef00
+	journal_command "sgdisk --new=0:0:+1G --typecode=0:ef02 $P_DEVICE"                            # Create second partition with 1GB and type ef02
+	journal_command "sgdisk --new=0:0:0 --typecode=0:$LVM_TYPE $P_DEVICE"                         # Create third partition with remaining space
+	journal_command "sgdisk --print $P_DEVICE"                                                    # Print the partition table
 }
 
 split_partitions() {
@@ -359,8 +358,6 @@ set -e
 
 journal_log -l "INFO" -m "Starting"
 journal_log -l "DEBUG" -m "Starting installer."
-exit 0
-# don't execute install script for now..
 
 partition_disks
 EFI_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E '1$' | tail -n 1)
