@@ -1,4 +1,5 @@
 .stow-local-ignore
+archinstall-journal*
 nvm/
 nvim/
 zsh/

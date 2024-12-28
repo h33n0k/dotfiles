@@ -1,5 +1,85 @@
 #!/bin/bash
 
+LOG_LEVELS=("DEBUG" "COMMAND" "INFO" "WARN" "ERROR")
+LOG_LEVEL="INFO"
+LOG_FILE_NAME="archinstall-journal.log"
+LOG_FILE="$LOG_FILE_NAME"
+LOG_FILE_EXISTS=true
+
+i=1
+while [[ "$LOG_FILE_EXISTS" == true ]]; do
+	if [ -f "$LOG_FILE" ]; then
+		# LOG_FILE=$(echo "$LOG_FILE_NAME" | sed -E "s/archinstall-journal\.log/archinstall-journal-$i.log/g")
+		rm "$LOG_FILE"
+	else
+		LOG_FILE_EXISTS=false
+		touch "$LOG_FILE"
+	fi
+	(( i++ ))
+done
+
+update_tui() {
+	clear
+	tail -n 10 "$LOG_FILE"
+}
+
+journal_log() {
+	local message=""
+	local LEVEL="$LOG_LEVEL"
+
+	OPTIND=1
+
+	while getopts "m:l:" opt; do
+		case $opt in
+			m) message="$OPTARG";;
+			l) LEVEL="$OPTARG" ;;
+		esac
+	done
+
+	local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+	[[ ! -z "$message" ]] && echo "[$timestamp] [$LEVEL] $message" >> "$LOG_FILE"
+	update_tui
+}
+
+EXIT_STATUS=0
+
+exit_script() {
+	journal_log -l "DEBUG" -m "Exiting installer."
+	if [ $EXIT_STATUS -ne 0 ]; then
+		journal_log -l "ERROR" -m "An error occured."
+	else
+		journal_log -l "INFO" -m "Sucessfully exiting."
+	fi
+	update_tui
+}
+
+trap exit_script EXIT
+
+journal_command() {
+	journal_log -l "COMMAND" -m "$1"
+	# eval "$1" >> "$LOG_FILE" 2>&1
+	eval "$1" | while IFS= read -r line; do
+	echo "$line" >> "$LOG_FILE"
+	update_tui
+done
+EXIT_STATUS="$?"
+if [ $EXIT_STATUS -ne 0 ]; then
+	journal_log -l "COMMAND" -m "END: $EXIT_STATUS"
+	update_tui
+	exit "$EXIT_STATUS"
+else
+	journal_log -l "COMMAND" -m "END: 0"
+	update_tui
+fi
+}
+
+journal_log -l "DEBUG" -m "Starting installer."
+
+journal_command "ping google.com -c 10"
+
+exit 0
+# don't execute install script for now..
+
 set -e
 
 # Initialize variables
