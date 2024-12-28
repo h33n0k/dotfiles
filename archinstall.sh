@@ -238,12 +238,12 @@ split_partitions() {
 }
 
 format_partitions() {
-	# FS formatting
+	journal_log -m "Formating partitions"
 	[[ "$UEFI" == true ]] && mkfs.fat -F32 "$EFI_PARTITION" # EFI
-	mkfs.ext4 "$BOOT_PARTITION"                             # BOOT
-	mkfs.btrfs -L root "$ROOT_PARTITION"                    # ROOT
-	mkfs.btrfs -L home "$HOME_PARTITION"                    # HOME
-	mkswap "$SWAP_PARTITION"                                # SWAP
+	journal_command "mkfs.ext4 -F $BOOT_PARTITION"          # BOOT
+	journal_command "mkfs.btrfs -f -L root $ROOT_PARTITION" # ROOT
+	journal_command "mkfs.btrfs -f -L home $HOME_PARTITION" # HOME
+	journal_command "mkswap -f $SWAP_PARTITION"             # SWAP
 }
 
 mount_partitions() {
@@ -358,7 +358,6 @@ pacman -Sy --noconfirm archlinux-keyring fzf && clear
 
 clear
 handle_options "$@"
-set -e
 
 journal_log -l "INFO" -m "Starting"
 journal_log -l "DEBUG" -m "Starting installer."
