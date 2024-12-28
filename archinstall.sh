@@ -247,18 +247,18 @@ format_partitions() {
 }
 
 mount_partitions() {
-	# Partitions mounting
-	swapon "$SWAP_PARTITION" # SWAP
-	swapon -a
+	journal_log -m "Mounting partitions"
+	journal_command "swapon $SWAP_PARTITION" # SWAP
+	journal_command "swapon -a"
 
-	mount "$ROOT_PARTITION" /mnt # ROOT
-	mkdir -p /mnt/{home,boot}
-	mount "$BOOT_PARTITION" /mnt/boot # BOOT
+	journal_command "mount $ROOT_PARTITION /mnt" # ROOT
+	journal_command "mkdir -p /mnt/{home,boot}"
+	journal_command "mount $BOOT_PARTITION /mnt/boot" # BOOT
 	if [[ "$UEFI" == true ]]; then
-		mkdir /mnt/boot/efi
-		mount "$EFI_PARTITION" /mnt/boot/efi # EFI
+		journal_command "mkdir /mnt/boot/efi"
+		journal_command "mount $EFI_PARTITION /mnt/boot/efi" # EFI
 	fi
-	mount "$HOME_PARTITION" /mnt/home # HOME
+	journal_command "mount "$HOME_PARTITION" /mnt/home" # HOME
 }
 
 arch_install() {
