@@ -15,12 +15,36 @@ while [[ "$LOG_FILE_EXISTS" == true ]]; do
 		LOG_FILE_EXISTS=false
 		touch "$LOG_FILE"
 	fi
-	(( i++ ))
+	((i++))
 done
 
+EXIT_STATUS=0
+LAST_INFO=""
+LAST_COMMAND=""
+
 update_tui() {
-	clear
-	tail -n 10 "$LOG_FILE"
+	tput sc      # Save cursor position
+	tput cup 0 0 # Move cursor to the top-left corner
+
+	[[ ! -z "$LAST_INFO" ]] && echo "status: $LAST_INFO"
+	[[ ! -z "$LAST_COMMAND" ]] && echo "command: $LAST_COMMAND"
+
+	# Get the last 15 lines from log file
+	log_output=$(tail -n 15 "$LOG_FILE")
+
+	# Calculate the width of the box
+	width=$(echo "$log_output" | awk '{print length($0)}' | sort -n | tail -n 1)
+	box_width=$((width + 4)) # Add 4 for padding (2 spaces on each side)
+
+	# Print the top border of the box
+	printf "%-${box_width}s\n" | tr ' ' '-'
+
+	# Print the log lines inside the box
+	while IFS= read -r line; do
+		printf "%-${width}s\n" "$line"
+	done <<<"$log_output"
+
+	[[ -z "$1" ]] && tput rc # Restore cursor position
 }
 
 journal_log() {
@@ -31,26 +55,32 @@ journal_log() {
 
 	while getopts "m:l:" opt; do
 		case $opt in
-			m) message="$OPTARG";;
-			l) LEVEL="$OPTARG" ;;
+		m) message="$OPTARG" ;;
+		l) LEVEL="$OPTARG" ;;
 		esac
 	done
 
 	local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
-	[[ ! -z "$message" ]] && echo "[$timestamp] [$LEVEL] $message" >> "$LOG_FILE"
+	if [[ ! -z "$message" ]]; then
+		case "$LEVEL" in
+		INFO) LAST_INFO="$message" ;;
+		COMMAND) [[ -z "$(echo "$message" | grep 'END')" ]] && LAST_COMMAND="$message" ;;
+		esac
+		echo "[$timestamp] [$LEVEL] $message" >>"$LOG_FILE"
+	fi
 	update_tui
 }
 
-EXIT_STATUS=0
-
 exit_script() {
+	tput sgr0
 	journal_log -l "DEBUG" -m "Exiting installer."
 	if [ $EXIT_STATUS -ne 0 ]; then
 		journal_log -l "ERROR" -m "An error occured."
 	else
 		journal_log -l "INFO" -m "Sucessfully exiting."
 	fi
-	update_tui
+	update_tui false
+	echo
 }
 
 trap exit_script EXIT
@@ -59,26 +89,21 @@ journal_command() {
 	journal_log -l "COMMAND" -m "$1"
 	# eval "$1" >> "$LOG_FILE" 2>&1
 	eval "$1" | while IFS= read -r line; do
-	echo "$line" >> "$LOG_FILE"
-	update_tui
-done
-EXIT_STATUS="$?"
-if [ $EXIT_STATUS -ne 0 ]; then
-	journal_log -l "COMMAND" -m "END: $EXIT_STATUS"
-	update_tui
-	exit "$EXIT_STATUS"
-else
-	journal_log -l "COMMAND" -m "END: 0"
-	update_tui
-fi
+		echo "$line" >>"$LOG_FILE"
+		update_tui
+	done
+	EXIT_STATUS="$?"
+	if [ $EXIT_STATUS -ne 0 ]; then
+		journal_log -l "COMMAND" -m "END: $EXIT_STATUS"
+		update_tui
+		exit "$EXIT_STATUS"
+	else
+		journal_log -l "COMMAND" -m "END: 0"
+		update_tui
+	fi
+	echo
 }
 
-journal_log -l "DEBUG" -m "Starting installer."
-
-journal_command "ping google.com -c 10"
-
-exit 0
-# don't execute install script for now..
 
 set -e
 
@@ -365,7 +390,13 @@ set_clock() {
 # Refresh keyring & Install required dependencies
 pacman -Sy --noconfirm archlinux-keyring fzf && clear
 
+clear
 handle_options "$@"
+
+journal_log -l "INFO" -m "Starting"
+journal_log -l "DEBUG" -m "Starting installer."
+exit 0
+# don't execute install script for now..
 
 partition_disks
 EFI_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E '1$' | tail -n 1)
