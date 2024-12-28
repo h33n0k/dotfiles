@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -e
-
 # Initialize variables
 P_HOSTNAME=""
 P_ZONE_INFO=""
@@ -81,47 +79,13 @@ handle_options() {
 }
 
 partition_disks() {
-	if [[ "$UEFI" == true ]]; then
-		gdisk "$P_DEVICE" <<EOF
-o
-Y
-n
 
-
-+512M
-ef00
-n
-
-
-+1G
-ef02
-n
-
-
-
-$([[ "$P_ENCRYPT" == true ]] && echo 8309 || echo 8300)
-w
-y
-EOF
-	else
-		gdisk "$P_DEVICE" <<EOF
-o
-Y
-n
-
-
-+1G
-ef02
-n
-
-
-
-$([[ "$P_ENCRYPT" == true ]] && echo 8309 || echo 8300)
-w
-y
-EOF
-	fi
-
+	local LVM_TYPE="$([[ "$P_ENCRYPT" == true ]] && echo 8309 || echo 8300)"
+	sgdisk --zap-all "$P_DEVICE"   # Clear the partition table
+	[[ "$UEFI" == true ]] && sgdisk --new=0:0:+512M --typecode=0:ef00 "$P_DEVICE"  # Create first partition with 512MB and type ef00
+	sgdisk --new=0:0:+1G --typecode=0:ef02 "$P_DEVICE"    # Create second partition with 1GB and type ef02
+	sgdisk --new=0:0:0 --typecode=0:$LVM_TYPE "$P_DEVICE"      # Create third partition with remaining space
+	sgdisk --print "$P_DEVICE"      # Print the partition table
 }
 
 split_partitions() {
@@ -286,15 +250,16 @@ set_clock() {
 pacman -Sy --noconfirm archlinux-keyring fzf && clear
 
 handle_options "$@"
+set -e
 
 partition_disks
 EFI_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E '1$' | tail -n 1)
 BOOT_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E "$([[ "$UEFI" == true ]] && echo 2 || echo 1)$" | tail -n 1)
 LVM_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E "$([[ "$UEFI" == true ]] && echo 3 || echo 2)$" | tail -n 1)
-LVM_UUID=$(blkid -s UUID -o value "$LVM_PARTITION")
-
 split_partitions
 format_partitions
+LVM_UUID=$(blkid -s UUID -o value "$LVM_PARTITION" 2>/dev/null)
+
 mount_partitions
 arch_install
 
