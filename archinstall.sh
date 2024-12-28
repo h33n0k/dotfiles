@@ -108,6 +108,7 @@ P_HOSTNAME=""
 P_ZONE_INFO=""
 P_LOCALE=""
 P_DEVICE=""
+P_PASSPHRASE=""
 P_ROOT_PASSWORD=""
 P_USER=""
 P_USER_PASSWORD=""
@@ -174,6 +175,7 @@ handle_options() {
 
 	[[ -z "$P_DEVICE" ]] && echo "device: " && P_DEVICE=$(lsblk -o NAME,SIZE,TYPE | grep disk | awk '{print "/dev/" $1 " (" $2 ")"}' | fzf --prompt="Select a device: " --height 40% --border | awk '{print $1}')
 	[[ -z "$P_HOSTNAME" ]] && prompt "P_HOSTNAME" "hostname: "
+	[[ "$P_ENCRYPT" == true ]] && [[ -z "$P_PASSPHRASE" ]] && prompt "P_PASSPHRASE" "encryption passphrase: "
 	[[ -z "$P_ROOT_PASSWORD" ]] && prompt "P_ROOT_PASSWORD" "root password: "
 	[[ -z "$P_USER" ]] && prompt "P_USER" "new user: "
 	[[ -z "$P_USER_PASSWORD" ]] && prompt "P_USER_PASSWORD" "password: "
@@ -192,25 +194,27 @@ partition_disks() {
 }
 
 split_partitions() {
+	journal_log -m "Splitting partitions"
+
 	if [[ "$P_ENCRYPT" == true ]]; then
 		# Load encryption modules
-		modprobe dm-crypt
-		modprobe dm-mod
+		journal_command "modprobe dm-crypt"
+		journal_command "modprobe dm-mod"
 
 		# Encrypt partition
-		cryptsetup luksFormat -v -s 512 -h sha512 "$LVM_PARTITION" # Encrypt
-		cryptsetup open "$LVM_PARTITION" arch-lvm                  # Open
+		journal_command "echo -n "$P_PASSPHRASE" | cryptsetup luksFormat -q --cipher aes-xts-plain64 --key-size 512 --hash sha512 "$LVM_PARTITION"" # Encrypt
+		journal_command "echo -n "$P_PASSPHRASE" | cryptsetup open "$LVM_PARTITION" arch-lvm"                                                       # Open
 
 		# LVM partitioning
-		pvcreate /dev/mapper/arch-lvm      # Create physical volume
-		vgcreate arch /dev/mapper/arch-lvm # Create volume group
+		journal_command "pvcreate -ff -y /dev/mapper/arch-lvm"  # Create physical volume
+		journal_command "vgcreate -y arch /dev/mapper/arch-lvm" # Create volume group
 
 		HOME_PARTITION="/dev/mapper/arch-home"
 		ROOT_PARTITION="/dev/mapper/arch-root"
 		SWAP_PARTITION="/dev/mapper/arch-swap"
 	else
-		pvcreate "$LVM_PARTITION"      # Create physical volume
-		vgcreate arch "$LVM_PARTITION" # Create volume group
+		journal_command "pvcreate -ff -y $LVM_PARTITION"  # Create physical volume
+		journal_command "vgcreate -y arch $LVM_PARTITION" # Create volume group
 
 		HOME_PARTITION="/dev/arch/home"
 		ROOT_PARTITION="/dev/arch/root"
@@ -227,7 +231,7 @@ split_partitions() {
 	SWAP_PARTITION_SIZE="$(compute_size 1)"
 	ROOT_PARTITION_SIZE="$(compute_size 4)"
 
-	# Create logical volumes
+	# Create logical volumes (auto-confirm overwrite with `-y`)
 	lvcreate -n swap -L "$SWAP_PARTITION_SIZE" -C y arch # SWAP
 	lvcreate -n root -L "$ROOT_PARTITION_SIZE" -C y arch # ROOT
 	lvcreate -n home -l +100%FREE arch                   # HOME
