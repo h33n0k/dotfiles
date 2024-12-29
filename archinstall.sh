@@ -359,12 +359,8 @@ bootloader_install() {
 }
 
 keyfile_configure() {
-	arch-chroot /mnt /bin/bash -c "
-		mkdir /crypt
-		dd if=/dev/random of=/crypt/arch_keyfile.bin bs=512 count=8
-		chmod 000 /crypt/*
-		cryptsetup luksAddKey $LVM_PARTITION /crypt/arch_keyfile.bin
-	"
+	journal_command "arch-chroot /mnt /bin/bash -c 'mkdir /crypt && dd if=/dev/random of=/crypt/arch_keyfile.bin bs=512 count=8 && chmod 000 /crypt/*'"
+	journal_command "arch-chroot /mnt /bin/bash -c 'echo -n "$P_PASSPHRASE" | ccryptsetup luksAddKey $LVM_PARTITION /crypt/arch_keyfile.bin'"
 }
 
 set_users() {
