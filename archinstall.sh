@@ -374,12 +374,10 @@ set_users() {
 set_lang() {
 	local NEXT_LINE="${P_LOCALE#\#}"
 	LOCALE="LANG=$(echo $NEXT_LINE | sed 's/ UTF-8$//')"
-	arch-chroot /mnt /bin/bash -c "
-		ln -sf $P_ZONE_INFO /etc/localtime
-		sed -i 's|^$P_LOCALE|$NEXT_LINE|' /etc/locale.gen
-		locale-gen
-		echo '$LOCALE' > /etc/locale.conf
-	"
+	journal_command "arch-chroot /mnt /bin/bash -c 'ln -sf $P_ZONE_INFO /etc/localtime'"
+	journal_command "arch-chroot /mnt /bin/bash -c \"sed -i 's|^$P_LOCALE|$NEXT_LINE|' /etc/locale.gen\""
+	journal_command "arch-chroot /mnt /bin/bash -c 'locale-gen'"
+	journal_command "arch-chroot /mnt /bin/bash -c 'echo '$LOCALE' > /etc/locale.conf'"
 }
 
 set_clock() {
