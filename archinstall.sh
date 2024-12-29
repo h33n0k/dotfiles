@@ -112,7 +112,7 @@ journal_command() {
 	journal_log -l "COMMAND" -m "(#$COMMAND_I) $1"
 
 	TMP_OUTPUT=$(mktemp)
-	eval "$1" > "$TMP_OUTPUT" 2>&1
+	eval "$1" >> "$TMP_OUTPUT" 2>&1
 
 	EXIT_STATUS="$?"
 
@@ -332,16 +332,15 @@ arch_install() {
 }
 
 mkinitcpio_configure() {
+	journal_log -m "Configuring initcpio"
+
 	local PREV_LINE="HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block filesystems fsck)"
 	local NEXT_LINE="HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block lvm2 filesystems fsck)"
 	local NEXT_LINE_ENCRYPT="HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt lvm2 filesystems fsck)"
-	if [[ "$P_ENCRYPT" == true ]]; then
-		arch-chroot /mnt /bin/bash -c "sed -i 's/$PREV_LINE/$NEXT_LINE_ENCRYPT/' /etc/mkinitcpio.conf"
-	else
-		arch-chroot /mnt /bin/bash -c "sed -i 's/$PREV_LINE/$NEXT_LINE/' /etc/mkinitcpio.conf"
-	fi
+	local COMMAND="sed -i 's/$PREV_LINE/$([[ "$P_ENCRYPT" == true ]] && echo "$NEXT_LINE_ENCRYPT" || echo "$NEXT_LINE")/' /etc/mkinitcpio.conf"
+	journal_command "arch-chroot /mnt /bin/bash -c \"$COMMAND\""
 
-	arch-chroot /mnt /bin/bash -c "mkinitcpio -P"
+	journal_command "arch-chroot /mnt /bin/bash -c 'mkinitcpio -P'" false
 }
 
 bootloader_install() {
@@ -418,11 +417,7 @@ LVM_UUID=$(blkid -s UUID -o value "$LVM_PARTITION" 2>/dev/null)
 
 mount_partitions
 arch_install
-
-set +e
 mkinitcpio_configure
-set -e
-
 bootloader_install
 [[ "$P_ENCRYPT" == true ]] && keyfile_configure
 set_users
