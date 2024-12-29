@@ -107,31 +107,35 @@ exit_script() {
 
 trap exit_script EXIT
 
-# Usage: journal_command <command> <exit_on_fail (default: true)>
+# Usage: journal_command <command> <chroot? (default: false)> <exit_on_fail? (default: true)>
 journal_command() {
 	journal_log -l "COMMAND" -m "(#$COMMAND_I) $1"
 
 	TMP_OUTPUT=$(mktemp)
-	eval "$1" >> "$TMP_OUTPUT" 2>&1
+
+	if [[ "$2" == true ]]; then
+		arch-chroot /mnt /bin/bash -c "$1" >>"$TMP_OUTPUT" 2>&1
+	else
+		eval "$1" >>"$TMP_OUTPUT" 2>&1
+	fi
 
 	EXIT_STATUS="$?"
 
 	while IFS= read -r line; do
 		echo "$line" >>"$LOG_FILE"
 		update_tui
-	done < "$TMP_OUTPUT"
+	done <"$TMP_OUTPUT"
 
 	journal_log -l "EXIT" -m "(#$COMMAND_I) $EXIT_STATUS"
 
 	if [ $EXIT_STATUS -ne 0 ]; then
-		if [ -z "$2" ] || [[ "$2" == true ]]; then
+		if [ -z "$3" ] || [[ "$3" == true ]]; then
 			exit $EXIT_STATUS
 		else
 			journal_log -l "WARNING" -m "'$1' exited with $EXIT_STATUS"
 			EXIT_STATUS=0
 		fi
 	fi
-
 
 	((COMMAND_I++))
 	rm -r "$TMP_OUTPUT"
@@ -319,7 +323,7 @@ arch_install() {
 	)
 
 	IFS=' '
-	journal_command "pacstrap -K /mnt ${PACKAGES[*]}" false
+	journal_command "pacstrap -K /mnt ${PACKAGES[*]}" false false
 
 	# Save mounts
 	journal_command "genfstab -U -p /mnt >/mnt/etc/fstab"
@@ -327,7 +331,7 @@ arch_install() {
 	journal_log -m "Updating keyring and sources"
 	IFS=$'\n'
 	for command in ${COMMANDS[@]}; do
-		journal_command "arch-chroot /mnt /bin/bash -c '$command'"
+		journal_command "$command" true
 	done
 }
 
@@ -337,10 +341,8 @@ mkinitcpio_configure() {
 	local PREV_LINE="HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block filesystems fsck)"
 	local NEXT_LINE="HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block lvm2 filesystems fsck)"
 	local NEXT_LINE_ENCRYPT="HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt lvm2 filesystems fsck)"
-	local COMMAND="sed -i 's/$PREV_LINE/$([[ "$P_ENCRYPT" == true ]] && echo "$NEXT_LINE_ENCRYPT" || echo "$NEXT_LINE")/' /etc/mkinitcpio.conf"
-	journal_command "arch-chroot /mnt /bin/bash -c \"$COMMAND\""
-
-	journal_command "arch-chroot /mnt /bin/bash -c 'mkinitcpio -P'" false
+	journal_command "sed -i 's/$PREV_LINE/$([[ "$P_ENCRYPT" == true ]] && echo "$NEXT_LINE_ENCRYPT" || echo "$NEXT_LINE")/' /etc/mkinitcpio.conf" true
+	journal_command "mkinitcpio -P" true false
 }
 
 bootloader_install() {
@@ -351,33 +353,36 @@ bootloader_install() {
 	local CMDLINE_DEFAULT="loglevel=3 quiet root=/dev/mapper/arch-root"
 	[[ "$P_ENCRYPT" == true ]] && CMDLINE_DEFAULT="$CMDLINE_DEFAULT cryptdevice=UUID=$LVM_UUID:arch-lvm"
 	local NEXT_LINE="$LINE=\\\"$CMDLINE_DEFAULT\\\""
-	journal_command "arch-chroot /mnt /bin/bash -c \"sed -i 's|^$LINE.*|$NEXT_LINE|' /etc/default/grub\""
+	journal_command "sed -i 's|^$LINE.*|$NEXT_LINE|' /etc/default/grub" true
 
-	journal_command "arch-chroot /mnt /bin/bash -c 'chmod 600 /boot/initramfs-linux*'"
-	journal_command "arch-chroot /mnt /bin/bash -c 'grub-mkconfig -o /boot/grub/grub.cfg'"
-	[[ "$UEFI" == true ]] && journal_command "arch-chroot /mnt /bin/bash -c 'grub-mkconfig -o /boot/efi/EFI/arch/grub.cfg'"
+	journal_command "chmod 600 /boot/initramfs-linux*" true
+	journal_command "grub-mkconfig -o /boot/grub/grub.cfg" true
+	[[ "$UEFI" == true ]] && journal_command "grub-mkconfig -o /boot/efi/EFI/arch/grub.cfg" true
 }
 
 keyfile_configure() {
-	journal_command "arch-chroot /mnt /bin/bash -c 'mkdir /crypt && dd if=/dev/random of=/crypt/arch_keyfile.bin bs=512 count=8 && chmod 000 /crypt/*'"
-	journal_command "arch-chroot /mnt /bin/bash -c 'echo -n "$P_PASSPHRASE" | ccryptsetup luksAddKey $LVM_PARTITION /crypt/arch_keyfile.bin'"
+	local KEYFILE="arch_keyfile.bin"
+	journal_command "mkdir /crypt" true
+	journal_command "chmod 000 /crypt/*" true
+	journal_command "dd if=/dev/random of=/crypt/$KEYFILE bs=512 count=8" true
+	journal_command "echo -n $P_PASSPHRASE | cryptsetup luksAddKey $LVM_PARTITION /crypt/$KEYFILE" true
 }
 
 set_users() {
-	journal_command "arch-chroot /mnt /bin/bash -c 'echo $P_HOSTNAME > /etc/hostname'"
-	journal_command "arch-chroot /mnt /bin/bash -c 'echo root:$P_ROOT_PASSWORD | chpasswd'"
-	journal_command "arch-chroot /mnt /bin/bash -c 'useradd -m -G wheel -s /bin/bash $P_USER'"
-	journal_command "arch-chroot /mnt /bin/bash -c 'echo $P_USER:$P_USER_PASSWORD | chpasswd'"
-	journal_command "arch-chroot /mnt /bin/bash -c \"sed -i 's|^# %wheel ALL=(ALL:ALL) ALL|%wheel ALL=(ALL:ALL) ALL|' /etc/sudoers\""
+	journal_command "echo $P_HOSTNAME > /etc/hostname" true
+	journal_command "echo root:$P_ROOT_PASSWORD | chpasswd" true
+	journal_command "useradd -m -G wheel -s /bin/bash $P_USER" true
+	journal_command "echo $P_USER:$P_USER_PASSWORD | chpasswd" true
+	journal_command "sed -i 's|^# %wheel ALL=(ALL:ALL) ALL|%wheel ALL=(ALL:ALL) ALL|' /etc/sudoers" true
 }
 
 set_lang() {
 	local NEXT_LINE="${P_LOCALE#\#}"
 	LOCALE="LANG=$(echo $NEXT_LINE | sed 's/ UTF-8$//')"
-	journal_command "arch-chroot /mnt /bin/bash -c 'ln -sf $P_ZONE_INFO /etc/localtime'"
-	journal_command "arch-chroot /mnt /bin/bash -c \"sed -i 's|^$P_LOCALE|$NEXT_LINE|' /etc/locale.gen\""
-	journal_command "arch-chroot /mnt /bin/bash -c 'locale-gen'"
-	journal_command "arch-chroot /mnt /bin/bash -c 'echo '$LOCALE' > /etc/locale.conf'"
+	journal_command "ln -sf $P_ZONE_INFO /etc/localtime" true
+	journal_command "sed -i 's|$P_LOCALE|$NEXT_LINE|' /etc/locale.gen" true
+	journal_command "locale-gen" true
+	journal_command "echo $LOCALE > /etc/locale.conf" true
 }
 
 set_clock() {
@@ -395,9 +400,9 @@ set_clock() {
 
 	IFS=' '
 	CONF_FILE="/etc/systemd/timesyncd.conf"
-	journal_command "arch-chroot /mnt /bin/bash -c 'echo NTP=${NTP[*]} >> $CONF_FILE'"
-	journal_command "arch-chroot /mnt /bin/bash -c 'echo FallbackNTP=${FALLBACK[*]} >> $CONF_FILE'"
-	journal_command "arch-chroot /mnt /bin/bash -c 'systemctl enable systemd-timesyncd.service'"
+	journal_command "echo NTP=${NTP[*]} >> $CONF_FILE" true
+	journal_command "echo FallbackNTP=${FALLBACK[*]} >> $CONF_FILE" true
+	journal_command "systemctl enable systemd-timesyncd.service" true
 }
 
 # Refresh keyring & Install required dependencies
