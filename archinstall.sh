@@ -364,13 +364,11 @@ keyfile_configure() {
 }
 
 set_users() {
-	arch-chroot /mnt /bin/bash -c "
-		echo $P_HOSTNAME > /etc/hostname
-		echo root:$P_ROOT_PASSWORD | chpasswd
-		useradd -m -G wheel -s /bin/bash $P_USER
-		echo $P_USER:$P_USER_PASSWORD | chpasswd
-		sed -i 's|^# %wheel ALL=(ALL:ALL) ALL|%wheel ALL=(ALL:ALL) ALL|' /etc/sudoers
-	"
+	journal_command "arch-chroot /mnt /bin/bash -c 'echo $P_HOSTNAME > /etc/hostname'"
+	journal_command "arch-chroot /mnt /bin/bash -c 'echo root:$P_ROOT_PASSWORD | chpasswd'"
+	journal_command "arch-chroot /mnt /bin/bash -c 'useradd -m -G wheel -s /bin/bash $P_USER'"
+	journal_command "arch-chroot /mnt /bin/bash -c 'echo $P_USER:$P_USER_PASSWORD | chpasswd'"
+	journal_command "arch-chroot /mnt /bin/bash -c \"sed -i 's|^# %wheel ALL=(ALL:ALL) ALL|%wheel ALL=(ALL:ALL) ALL|' /etc/sudoers\""
 }
 
 set_lang() {
