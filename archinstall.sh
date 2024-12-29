@@ -345,17 +345,17 @@ mkinitcpio_configure() {
 
 bootloader_install() {
 	local command=$([[ "$UEFI" == true ]] && echo "grub-install --efi-directory=/boot/efi" || echo "grub-install --target=i386-pc $P_DEVICE")
-	arch-chroot /mnt /bin/bash -c "$command"
+	journal_command "arch-chroot /mnt /bin/bash -c '$command'"
 
-	local PREV_LINE='GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet"'
+	local LINE="GRUB_CMDLINE_LINUX_DEFAULT"
 	local CMDLINE_DEFAULT="loglevel=3 quiet root=/dev/mapper/arch-root"
 	[[ "$P_ENCRYPT" == true ]] && CMDLINE_DEFAULT="$CMDLINE_DEFAULT cryptdevice=UUID=$LVM_UUID:arch-lvm"
-	local NEXT_LINE="GRUB_CMDLINE_LINUX_DEFAULT=\"$CMDLINE_DEFAULT\""
-	arch-chroot /mnt /bin/bash -c "sed -i 's|$PREV_LINE|$NEXT_LINE|' /etc/default/grub"
+	local NEXT_LINE="$LINE=\\\"$CMDLINE_DEFAULT\\\""
+	journal_command "arch-chroot /mnt /bin/bash -c \"sed -i 's|^$LINE.*|$NEXT_LINE|' /etc/default/grub\""
 
-	arch-chroot /mnt /bin/bash -c "chmod 600 /boot/initramfs-linux*"
-	arch-chroot /mnt /bin/bash -c "grub-mkconfig -o /boot/grub/grub.cfg"
-	[[ "$UEFI" == true ]] && arch-chroot /mnt /bin/bash -c "grub-mkconfig -o /boot/efi/EFI/arch/grub.cfg"
+	journal_command "arch-chroot /mnt /bin/bash -c 'chmod 600 /boot/initramfs-linux*'"
+	journal_command "arch-chroot /mnt /bin/bash -c 'grub-mkconfig -o /boot/grub/grub.cfg'"
+	[[ "$UEFI" == true ]] && journal_command "arch-chroot /mnt /bin/bash -c 'grub-mkconfig -o /boot/efi/EFI/arch/grub.cfg'"
 }
 
 keyfile_configure() {
@@ -412,8 +412,8 @@ EFI_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E '1$' | tail -n 1)
 BOOT_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E "$([[ "$UEFI" == true ]] && echo 2 || echo 1)$" | tail -n 1)
 LVM_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E "$([[ "$UEFI" == true ]] && echo 3 || echo 2)$" | tail -n 1)
 split_partitions
-format_partitions
 LVM_UUID=$(blkid -s UUID -o value "$LVM_PARTITION" 2>/dev/null)
+format_partitions
 
 mount_partitions
 arch_install
