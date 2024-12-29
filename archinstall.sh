@@ -297,27 +297,38 @@ mount_partitions() {
 }
 
 arch_install() {
-	pacstrap -K /mnt \
-		base \
-		base-devel \
-		linux \
-		linux-firmware \
-		lvm2 \
-		grub \
-		efibootmgr \
-		networkmanager
+	journal_log -m "Installing archlinux"
+	local PACKAGES=(
+		"base"
+		"base-devel"
+		"linux"
+		"linux-firmware"
+		"lvm2"
+		"grub"
+		"efibootmgr"
+		"networkmanager"
+	)
+
+	local COMMANDS=(
+		"pacman -Sy --noconfirm archlinux-keyring"
+		"pacman-key --init"
+		"pacman-key --populate archlinux"
+		"pacman -Scc --noconfirm"
+		"pacman -Sy"
+		"pacman -Scc --noconfirm"
+	)
+
+	IFS=' '
+	journal_command "pacstrap -K /mnt ${PACKAGES[*]}" false
 
 	# Save mounts
-	genfstab -U -p /mnt >/mnt/etc/fstab
+	journal_command "genfstab -U -p /mnt >/mnt/etc/fstab"
 
-	# Update keyring
-	arch-chroot /mnt /bin/bash -c "
-		pacman -Sy --noconfirm archlinux-keyring
-		pacman-key --init
-		pacman-key --populate archlinux
-		pacman -Scc --noconfirm
-		pacman -Sy
-	"
+	journal_log -m "Updating keyring and sources"
+	IFS=$'\n'
+	for command in ${COMMANDS[@]}; do
+		journal_command "arch-chroot /mnt /bin/bash -c '$command'"
+	done
 }
 
 mkinitcpio_configure() {
