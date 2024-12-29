@@ -1,6 +1,6 @@
 #!/bin/bash
 
-LOG_LEVELS=("DEBUG" "COMMAND" "INFO" "WARN" "ERROR")
+LOG_LEVELS=("DEBUG" "COMMAND" "EXIT" "INFO" "WARN" "ERROR")
 LOG_LEVEL="INFO"
 LOG_FILE_NAME="archinstall-journal.log"
 LOG_FILE="$LOG_FILE_NAME"
@@ -21,26 +21,47 @@ done
 EXIT_STATUS=0
 LAST_INFO=""
 LAST_COMMAND=""
+COMMAND_I=0
+WARNINGS=()
 
 update_tui() {
 	tput sc      # Save cursor position
 	tput cup 0 0 # Move cursor to the top-left corner
 
-	[[ ! -z "$LAST_INFO" ]] && echo "status: $LAST_INFO"
-	[[ ! -z "$LAST_COMMAND" ]] && echo "command: $LAST_COMMAND"
+	clear_line() {
+		tput cr
+		tput el
+	}
+
+	# Get width of stdout
+	width=$(echo "$log_output" | awk '{print length($0)}' | sort -n | tail -n 1)
+	box_width=$((width + 4)) # Add 4 for padding
+
+	break_line() {
+		clear_line
+		printf "%-${box_width}s\n" | tr ' ' '-'
+	}
+
+	clear_line
+	[[ ! -z "$LAST_INFO" ]] && printf "%-8s %-15s\n" "STATUS:" "$LAST_INFO"
+	clear_line
+	[[ ! -z "$LAST_COMMAND" ]] && printf "%-8s %-15s\n" "COMMAND:" "$LAST_COMMAND"
+
+	break_line
+
+	if [ ${#WARNINGS[@]} -ne 0 ]; then
+		IFS=$'\n'
+		for w in ${WARNINGS[@]}; do
+			clear_line
+			printf "%-8s %-15s\n" "WARNING:" "$w"
+		done
+		break_line
+	fi
 
 	# Get the last 15 lines from log file
 	log_output=$(tail -n 15 "$LOG_FILE")
-
-	# Calculate the width of the box
-	width=$(echo "$log_output" | awk '{print length($0)}' | sort -n | tail -n 1)
-	box_width=$((width + 4)) # Add 4 for padding (2 spaces on each side)
-
-	# Print the top border of the box
-	printf "%-${box_width}s\n" | tr ' ' '-'
-
-	# Print the log lines inside the box
 	while IFS= read -r line; do
+		clear_line
 		printf "%-${width}s\n" "$line"
 	done <<<"$log_output"
 
@@ -65,6 +86,7 @@ journal_log() {
 		case "$LEVEL" in
 		INFO) LAST_INFO="$message" ;;
 		COMMAND) [[ -z "$(echo "$message" | grep 'END')" ]] && LAST_COMMAND="$message" ;;
+		WARNING) WARNINGS+=("$message") ;;
 		esac
 		echo "[$timestamp] [$LEVEL] $message" >>"$LOG_FILE"
 	fi
@@ -85,21 +107,34 @@ exit_script() {
 
 trap exit_script EXIT
 
+# Usage: journal_command <command> <exit_on_fail (default: true)>
 journal_command() {
-	journal_log -l "COMMAND" -m "$1"
-	eval "$1" | while IFS= read -r line; do
+	journal_log -l "COMMAND" -m "(#$COMMAND_I) $1"
+
+	TMP_OUTPUT=$(mktemp)
+	eval "$1" > "$TMP_OUTPUT" 2>&1
+
+	EXIT_STATUS="$?"
+
+	while IFS= read -r line; do
 		echo "$line" >>"$LOG_FILE"
 		update_tui
-	done
-	EXIT_STATUS="$?"
+	done < "$TMP_OUTPUT"
+
+	journal_log -l "EXIT" -m "(#$COMMAND_I) $EXIT_STATUS"
+
 	if [ $EXIT_STATUS -ne 0 ]; then
-		journal_log -l "COMMAND" -m "END: $EXIT_STATUS"
-		update_tui
-		exit "$EXIT_STATUS"
-	else
-		journal_log -l "COMMAND" -m "END: 0"
-		update_tui
+		if [ -z "$2" ] || [[ "$2" == true ]]; then
+			exit $EXIT_STATUS
+		else
+			journal_log -l "WARNING" -m "'$1' exited with $EXIT_STATUS"
+			EXIT_STATUS=0
+		fi
 	fi
+
+
+	((COMMAND_I++))
+	rm -r "$TMP_OUTPUT"
 	echo
 }
 
