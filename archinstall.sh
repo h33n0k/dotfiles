@@ -9,8 +9,7 @@ LOG_FILE_EXISTS=true
 i=1
 while [[ "$LOG_FILE_EXISTS" == true ]]; do
 	if [ -f "$LOG_FILE" ]; then
-		# LOG_FILE=$(echo "$LOG_FILE_NAME" | sed -E "s/archinstall-journal\.log/archinstall-journal-$i.log/g")
-		rm "$LOG_FILE"
+		LOG_FILE=$(echo "$LOG_FILE_NAME" | sed -E "s/archinstall-journal\.log/archinstall-journal-$i.log/g")
 	else
 		LOG_FILE_EXISTS=false
 		touch "$LOG_FILE"
@@ -95,9 +94,8 @@ journal_log() {
 
 exit_script() {
 	tput sgr0
-	journal_log -l "DEBUG" -m "Exiting installer."
 	if [ $EXIT_STATUS -ne 0 ]; then
-		journal_log -l "ERROR" -m "An error occured."
+		journal_log -l "INFO" -m "An error occured."
 	else
 		journal_log -l "INFO" -m "Sucessfully exiting."
 	fi
@@ -106,6 +104,13 @@ exit_script() {
 }
 
 trap exit_script EXIT
+
+journal_throw() {
+	local status=$([[ -z "$2" ]] && echo 1 || echo "$2")
+	journal_log -l "ERROR" -m "$1"
+	EXIT_STATUS="$status"
+	exit $status
+}
 
 # Usage: journal_command <command> <chroot? (default: false)> <exit_on_fail? (default: true)>
 journal_command() {
@@ -130,7 +135,7 @@ journal_command() {
 
 	if [ $EXIT_STATUS -ne 0 ]; then
 		if [ -z "$3" ] || [[ "$3" == true ]]; then
-			exit $EXIT_STATUS
+			journal_throw "command #$COMMAND_I exited with status $EXIT_STATUS" "$EXIT_STATUS"
 		else
 			journal_log -l "WARNING" -m "'$1' exited with $EXIT_STATUS"
 			EXIT_STATUS=0
@@ -140,6 +145,10 @@ journal_command() {
 	((COMMAND_I++))
 	rm -r "$TMP_OUTPUT"
 	echo
+}
+
+check_block() {
+	[[ ! -b "$1" ]] && journal_throw "$1 is not a valid block."
 }
 
 # Initialize variables
@@ -220,6 +229,23 @@ handle_options() {
 	[[ -z "$P_USER_PASSWORD" ]] && prompt "P_USER_PASSWORD" "password: "
 	[[ -z "$P_ZONE_INFO" ]] && echo "zone info: " && P_ZONE_INFO=$(find /usr/share/zoneinfo/ -type f | fzf --preview 'echo {} | cut -d/ -f5- | tr "/" " "' --height 40% --border --preview-window=down:1:wrap)
 	[[ -z "$P_LOCALE" ]] && echo "locale: " && P_LOCALE=$(grep -E '^.*UTF-8' /etc/locale.gen | fzf --preview 'echo {}' --height 40% --border --preview-window=down:3:wrap)
+
+	local EMPTY_CHECKS=(
+		"P_DEVICE"
+		"P_ROOT_PASSWORD"
+		"P_USER"
+		"P_USER_PASSWORD"
+		"P_ZONE_INFO"
+		"P_LOCALE"
+	)
+
+	for check in ${EMPTY_CHECKS[@]}; do
+		value=$(eval "echo \$$check")
+		[[ -z "$value" ]] && journal_throw "${check#P_} must not be empty."
+	done
+
+	[[ "$P_ENCRYPT" == true ]] && [[ -z "$P_PASSPHRASE" ]] && journal_throw "PASSPHRASE must not be empty."
+	check_block "$P_DEVICE"
 }
 
 partition_disks() {
@@ -230,10 +256,19 @@ partition_disks() {
 	journal_command "sgdisk --new=0:0:+1G --typecode=0:ef02 $P_DEVICE"                            # Create second partition with 1GB and type ef02
 	journal_command "sgdisk --new=0:0:0 --typecode=0:$LVM_TYPE $P_DEVICE"                         # Create third partition with remaining space
 	journal_command "sgdisk --print $P_DEVICE"                                                    # Print the partition table
+
+	EFI_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E '1$' | tail -n 1)
+	BOOT_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E "$([[ "$UEFI" == true ]] && echo 2 || echo 1)$" | tail -n 1)
+	LVM_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E "$([[ "$UEFI" == true ]] && echo 3 || echo 2)$" | tail -n 1)
+
+	check_block "$EFI_PARTITION"
+	check_block "$BOOT_PARTITION"
+  [[ "$UEFI" == true ]] && check_block "$EFI_PARTITION"
 }
 
 split_partitions() {
 	journal_log -m "Splitting partitions"
+	sleep 5s
 
 	if [[ "$P_ENCRYPT" == true ]]; then
 		# Load encryption modules
@@ -241,8 +276,8 @@ split_partitions() {
 		journal_command "modprobe dm-mod"
 
 		# Encrypt partition
-		journal_command "echo -n "$P_PASSPHRASE" | cryptsetup luksFormat -q --cipher aes-xts-plain64 --key-size 512 --hash sha512 "$LVM_PARTITION"" # Encrypt
-		journal_command "echo -n "$P_PASSPHRASE" | cryptsetup open "$LVM_PARTITION" arch-lvm"                                                       # Open
+		journal_command "echo -n '$P_PASSPHRASE' | cryptsetup luksFormat -q --cipher aes-xts-plain64 --key-size 512 --hash sha512 '$LVM_PARTITION'" # Encrypt
+		journal_command "echo -n '$P_PASSPHRASE' | cryptsetup open '$LVM_PARTITION' arch-lvm"                                                       # Open
 
 		# LVM partitioning
 		journal_command "pvcreate -ff -y /dev/mapper/arch-lvm"  # Create physical volume
@@ -283,6 +318,9 @@ format_partitions() {
 	journal_command "mkfs.btrfs -f -L root $ROOT_PARTITION" # ROOT
 	journal_command "mkfs.btrfs -f -L home $HOME_PARTITION" # HOME
 	journal_command "mkswap -f $SWAP_PARTITION"             # SWAP
+
+	LVM_UUID=$(blkid -s UUID -o value "$LVM_PARTITION" 2>/dev/null)
+	[[ -z "$LVM_UUID" ]] && journal_throw "LVM uuid must be defined"
 }
 
 mount_partitions() {
@@ -362,17 +400,16 @@ bootloader_install() {
 
 keyfile_configure() {
 	local KEYFILE="arch_keyfile.bin"
-	journal_command "mkdir /crypt" true
-	journal_command "chmod 000 /crypt/*" true
-	journal_command "dd if=/dev/random of=/crypt/$KEYFILE bs=512 count=8" true
-	journal_command "echo -n $P_PASSPHRASE | cryptsetup luksAddKey $LVM_PARTITION /crypt/$KEYFILE" true
+	journal_command "mkdir /crypt" true false
+	journal_command "dd if=/dev/random of=/crypt/$KEYFILE bs=512 count=8 && chmod 000 /crypt/*" true
+	journal_command "echo -n '$P_PASSPHRASE' | cryptsetup luksAddKey $LVM_PARTITION /crypt/$KEYFILE" true
 }
 
 set_users() {
 	journal_command "echo $P_HOSTNAME > /etc/hostname" true
-	journal_command "echo root:$P_ROOT_PASSWORD | chpasswd" true
+	journal_command "echo 'root:$P_ROOT_PASSWORD' | chpasswd" true
 	journal_command "useradd -m -G wheel -s /bin/bash $P_USER" true
-	journal_command "echo $P_USER:$P_USER_PASSWORD | chpasswd" true
+	journal_command "echo '$P_USER:$P_USER_PASSWORD' | chpasswd" true
 	journal_command "sed -i 's|^# %wheel ALL=(ALL:ALL) ALL|%wheel ALL=(ALL:ALL) ALL|' /etc/sudoers" true
 }
 
@@ -400,8 +437,8 @@ set_clock() {
 
 	IFS=' '
 	CONF_FILE="/etc/systemd/timesyncd.conf"
-	journal_command "echo NTP=${NTP[*]} >> $CONF_FILE" true
-	journal_command "echo FallbackNTP=${FALLBACK[*]} >> $CONF_FILE" true
+	journal_command "echo 'NTP=${NTP[*]}' >> $CONF_FILE" true
+	journal_command "echo 'FallbackNTP=${FALLBACK[*]}' >> $CONF_FILE" true
 	journal_command "systemctl enable systemd-timesyncd.service" true
 }
 
@@ -412,16 +449,9 @@ clear
 handle_options "$@"
 
 journal_log -l "INFO" -m "Starting"
-journal_log -l "DEBUG" -m "Starting installer."
-
 partition_disks
-EFI_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E '1$' | tail -n 1)
-BOOT_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E "$([[ "$UEFI" == true ]] && echo 2 || echo 1)$" | tail -n 1)
-LVM_PARTITION=$(lsblk -lnpo NAME "$P_DEVICE" | grep -E "$([[ "$UEFI" == true ]] && echo 3 || echo 2)$" | tail -n 1)
 split_partitions
-LVM_UUID=$(blkid -s UUID -o value "$LVM_PARTITION" 2>/dev/null)
 format_partitions
-
 mount_partitions
 arch_install
 mkinitcpio_configure
