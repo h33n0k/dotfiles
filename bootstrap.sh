@@ -8,37 +8,39 @@ BASE_DIR="$(cd "$(dirname "$0")" && pwd -P)" # Get current pwd
 DIST="$(. /etc/os-release && echo "$ID")" # Get current linux distribution
 
 # Initialize variables
-UPDATE_REQUIRED=false
+UPDATE_REQUIRED=true
 
 # Parse the options
 while [[ $# -gt 0 ]]; do
 	case $1 in
-		--update-required)
-			UPDATE_REQUIRED=true
+		--no-update)
+			UPDATE_REQUIRED=false
 			shift
 			;;
 	esac
 done
 
-# Update sources
-case "$DIST" in
-	arch) sudo pacman -Syy ;;
-	debian) sudo apt-get update ;;
-esac
+if [[ "$UPDATE_REQUIRED" == true ]]; then
+	# Update sources
+	case "$DIST" in
+		arch) sudo pacman -Syy ;;
+		debian) sudo apt-get update ;;
+	esac
 
-# Install required tools
-for package in jq git yq; do
-	if ! command -v "$package" > /dev/null 2>&1; then
-		case "$DIST" in
-			arch) sudo pacman -S --noconfirm "$package" ;;
-			debian) sudo apt-get install -y "$package" ;;
-		esac
-	fi
-done
+	# Install required tools
+	for package in jq git yq; do
+		if ! command -v "$package" > /dev/null 2>&1; then
+			case "$DIST" in
+				arch) sudo pacman -S --noconfirm "$package" ;;
+				debian) sudo apt-get install -y "$package" ;;
+			esac
+		fi
+	done
 
-case "$DIST" in
-	arch) sudo pacman -S --noconfirm base-devel ;;
-esac
+	case "$DIST" in
+		arch) sudo pacman -S --noconfirm base-devel ;;
+	esac
+fi
 
 parse_echo() {
 	# Convert hex color code to RGB and return an ANSI escape code for color
@@ -101,14 +103,16 @@ for element in $BASE_DIR/*; do
 	scripts="[]"
 	if tomlq -r '.scripts[]' $config > /dev/null 2>&1; then
 		IFS=$'\n'
-		for script in $(tomlq -rc '.scripts[] | { path: .path, description: .description }' "$config"); do
+		for script in $(tomlq -rc '.scripts[] | { path: .path, description: .description, after: .after }' "$config"); do
+			after=$(echo "$script" | jq -rc '.after')
 			file="$(echo "$script" | jq -rc '.path')"
 			description="$(echo "$script" | jq -rc '.description')"
 			[[ "$file" != /* ]] && path="$(realpath "$element/$file")" || path="$file"
 			scripts=$(echo "$scripts" | jq -c \
 				--arg path "$path" \
 				--arg description "$description" \
-				'. + [{ path: $path, description: $description }]'
+				--arg after "$after" \
+				'. + [{ path: $path, description: $description, after: ($after | test("^(true|1)$"; "i") | not | not) }]'
 			)
 		done
 	fi
@@ -278,13 +282,6 @@ for manager in ${managers[@]}; do
 	packages=$(jq -c --arg name "$manager" --argjson array "$array" '. + { $name: $array }' <<< "$packages")
 done
 
-scripts="[]"
-for item in $(jq -c '.[]' <<< "$selected"); do
-	for script in $(jq -c '.dependencies.scripts[]' <<< "$item"); do
-		scripts=$(jq --arg path "$(jq -r '.path' <<< "$script")" '. + [$path]' <<< "$scripts")
-	done
-done
-
 # Install dependencies
 case "$DIST" in
 	arch)
@@ -307,12 +304,32 @@ case "$DIST" in
 	debian) sudo apt-get install $(jq -r '[.apt[]] | unique | .[]' <<< "$packages") ;;
 esac
 
-# Run scripts
-for script in $(jq -cr '.[]' <<< "$scripts"); do
-	if [ ! -f "$script" ]; then
-		echo "$(parse_echo "$COLOR_RED")Could not locate $script.$(reset_echo)"
-		continue
-	fi
-	chmod +x "$script"
-	$script
+scripts='{ "before": [], "after": [] }'
+for item in $(jq -c '.[]' <<< "$selected"); do
+	for script in $(jq -c '.dependencies.scripts[]' <<< "$item"); do
+		script_path="$(jq -r '.path' <<< "$script")"
+		if [[ $(jq -c '.after' <<< "$script") == "true" ]]; then
+			scripts=$(jq --arg path "$script_path" '.after += [$path]' <<< "$scripts")
+		else
+			scripts=$(jq --arg path "$script_path" '.before += [$path]' <<< "$scripts")
+		fi
+	done
 done
+
+run_scripts() {
+	local SCRIPTS="$1"
+	for script in $(jq -cr '.[]' <<< "$SCRIPTS"); do
+		if [ ! -f "$script" ]; then
+			echo "$(parse_echo "$COLOR_RED")Could not locate $script.$(reset_echo)"
+			continue
+		fi
+		chmod +x "$script"
+		$script
+	done
+}
+
+# Run required scripts
+run_scripts "$(jq '.before' <<< "$scripts")"
+
+# Run final scripts
+run_scripts "$(jq '.after' <<< "$scripts")"
