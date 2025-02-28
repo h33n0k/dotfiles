@@ -1,7 +1,7 @@
-FROM archlinux:latest
+FROM archlinux:latest AS base
 
 # Install core packages
-RUN pacman -Sy --noconfirm "bash" "sudo"
+RUN pacman -Sy --noconfirm bash sudo git jq yq stow && pacman -Scc --noconfirm
 
 # Mock user
 RUN useradd -m -s /bin/bash mockeduser \
@@ -9,12 +9,14 @@ RUN useradd -m -s /bin/bash mockeduser \
 	&& chmod 0440 /etc/sudoers.d/mockeduser
 
 WORKDIR /home/mockeduser/dotfiles
-
-# Install bootstrap core packages (optional)
-RUN pacman -Sy --noconfirm "git" "jq" "yq"
-
-COPY . /home/mockeduser/dotfiles/
-RUN chmod +x "/home/mockeduser/dotfiles/bootstrap.sh"
-
 USER mockeduser
+
+FROM base AS final
+
+WORKDIR /home/mockeduser/dotfiles
+USER mockeduser
+
+# Copy dotfiles
+COPY --chown=mockeduser . /home/mockeduser/dotfiles
+
 CMD bash -c "/home/mockeduser/dotfiles/bootstrap.sh; exec bash"
