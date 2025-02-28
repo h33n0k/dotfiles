@@ -1,3 +1,4 @@
 arch.Dockerfile
 debian.Dockerfile
 test.sh
+.stow*

@@ -105,7 +105,7 @@ update_required() {
 	esac
 
 	# Install required tools
-	for package in jq git yq; do
+	for package in stow jq git yq; do
 		if ! command -v "$package" > /dev/null 2>&1; then
 			case "$DIST" in
 				arch) sudo pacman -S --noconfirm "$package" ;;
@@ -355,19 +355,37 @@ run_scripts() {
 	done
 }
 
-# Script pipeline:
+link_files() {
+	for module in $(jq -c '.[]' <<< "$SELECTED_MODULES"); do
+		local path="$(jq -cr '.path' <<< "$module")"
+		local name=$(basename "$path")
+		# Prevent config files from being linked
+		local ignore_file="$path/.stow-local-ignore"
+		echo ".module.toml" > "$ignore_file"
 
+		## Include scripts files
+		for script in $(jq -c '.dependencies.scripts[]' <<< "$module"); do
+			local script_path="$(jq -cr '.path' <<< "$script")"
+			local relative=$(realpath --relative-to="$path" "$script_path")
+			echo "$relative" >> "$ignore_file"
+		done
+
+		# Link files
+		stow -d "$BASE_DIR" -t "$HOME" "$(basename "$path")"
+	done
+}
+
+# Script pipeline:
 [[ "$UPDATE_REQUIRED" == true ]] && update_required
 
 ## Read modules
 MODULES=$(read_modules)
 SELECTED_MODULES=$(prompt_menu -p "Select modules to enable" -i "$MODULES")
-
 SCRIPTS=$(get_scripts)
 
 ## Install and configure dependencies
 [[ "$INSTALL_PACKAGES" == true ]] && install_dependencies
-run_scripts "$(jq '.before' <<< "$SCRIPTS")" > /dev/tty
 
-## Final setup
+run_scripts "$(jq '.before' <<< "$SCRIPTS")" > /dev/tty
+link_files
 run_scripts "$(jq '.after' <<< "$SCRIPTS")" > /dev/tty
