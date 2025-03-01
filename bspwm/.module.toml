@@ -1,0 +1,15 @@
+[module]
+name = "Bswm"
+description = "Tiling window manager"
+type = "Desktop"
+
+[dependencies]
+pacman = [
+	"bspwm",
+	"nitrogen",
+	"sxhkd"
+]
+
+[[scripts]]
+path = "./setup.sh"
+description = "this script define necessary settings for bspwm"
