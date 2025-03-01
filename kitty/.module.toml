@@ -1,0 +1,12 @@
+[module]
+name = "Kitty"
+description = "Terminal Emulator"
+type = "Application"
+
+[dependencies]
+pacman = [
+	"kitty",
+	"fontconfig",
+	"ttf-dejavu",
+	"ttf-nerd-fonts-symbols"
+]
