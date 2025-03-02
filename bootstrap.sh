@@ -18,6 +18,7 @@ DIST="$(. /etc/os-release && echo "$ID")" # Get current linux distribution
 MANAGERS=("pacman" "aur" "apt")
 
 ## Options
+XEPHYR=false
 UPDATE_REQUIRED=true
 INSTALL_PACKAGES=true
 
@@ -29,6 +30,10 @@ SCRIPTS='{ "before": [], "after": [] }'
 # Parse the options
 while [[ $# -gt 0 ]]; do
 	case $1 in
+		--xephyr)
+			XEPHYR=true
+			shift
+			;;
 		--no-install)
 			INSTALL_PACKAGES=false
 			shift
@@ -351,7 +356,7 @@ run_scripts() {
 			continue
 		fi
 		chmod +x "$script"
-		$script
+		$script --xephyr $XEPHYR
 	done
 }
 

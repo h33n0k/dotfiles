@@ -31,4 +31,4 @@ RUN export $(dbus-launch)
 # Copy dotfiles
 COPY --chown=mockeduser . /home/mockeduser/dotfiles
 
-CMD bash -c "eval \$(dbus-launch --sh-syntax) && /home/mockeduser/dotfiles/bootstrap.sh --no-update; [[ \"$DESKTOP\" == \"true\" ]] && bspwm || exec bash"
+CMD bash -c "eval \$(dbus-launch --sh-syntax) && /home/mockeduser/dotfiles/bootstrap.sh --no-update --xephyr; [[ \"$DESKTOP\" == \"true\" ]] && bspwm || exec bash"

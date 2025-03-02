@@ -7,8 +7,13 @@ type = "Desktop"
 pacman = [
 	"bspwm",
 	"nitrogen",
-	"sxhkd"
+	"sxhkd",
+	"picom"
 ]
+
+[[scripts]]
+path = "./picom-setup.sh"
+description = "this script install necessary package for picom compositor"
 
 [[scripts]]
 path = "./setup.sh"
