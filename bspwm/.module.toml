@@ -1,0 +1,20 @@
+[module]
+name = "Bswm"
+description = "Tiling window manager"
+type = "Desktop"
+
+[dependencies]
+pacman = [
+	"bspwm",
+	"nitrogen",
+	"sxhkd",
+	"picom"
+]
+
+[[scripts]]
+path = "./picom-setup.sh"
+description = "this script install necessary package for picom compositor"
+
+[[scripts]]
+path = "./setup.sh"
+description = "this script define necessary settings for bspwm"
